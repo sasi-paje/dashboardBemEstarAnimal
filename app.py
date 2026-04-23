@@ -326,9 +326,10 @@ def create_ocupacao_chart(df):
         font=dict(color='#374151', size=12),
         margin=dict(l=10, r=10, t=10, b=10),
         height=280,
-        showlegend=True,
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
-        bargap=0.3
+        showlegend=False,
+        legend=None,
+        xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
     )
     fig.update_xaxes(tickangle=45, gridcolor='#f3f4f6', ticks='outside')
     fig.update_yaxes(gridcolor='#f3f4f6', ticks='outside')
@@ -376,7 +377,7 @@ def create_temporal_chart(df):
     if df.empty:
         return create_empty_figure()
 
-    df_grouped = df.groupby(['data', 'local_servico']).agg({
+    df_grouped = df.groupby(['data']).agg({
         'total_vagas': 'sum',
         'vagas_ocupadas': 'sum',
         'nao_compareceram': 'sum'
@@ -384,7 +385,7 @@ def create_temporal_chart(df):
     df_grouped = df_grouped.sort_values('data')
 
     df_melt = df_grouped.melt(
-        id_vars=['data', 'local_servico'],
+        id_vars=['data'],
         value_vars=['total_vagas', 'vagas_ocupadas', 'nao_compareceram'],
         var_name='tipo',
         value_name='quantidade'
@@ -409,8 +410,11 @@ def create_temporal_chart(df):
             'Total Vagas': '#3B82F6',
             'Ocupadas': '#10B981',
             'Não Comp.': '#EF4444'
-        }
+        },
+        text='quantidade'
     )
+
+    fig.update_traces(textposition='outside')
 
     fig.update_layout(
         paper_bgcolor='white',
@@ -418,8 +422,7 @@ def create_temporal_chart(df):
         font=dict(color='#374151'),
         margin=dict(l=10, r=10, t=10, b=10),
         height=280,
-        showlegend=True,
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+        showlegend=False,
         xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
         yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
     )
