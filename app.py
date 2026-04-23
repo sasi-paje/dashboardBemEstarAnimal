@@ -13,6 +13,7 @@ from db import (
     get_fila_temporal,
     get_fluxo_departamentos,
     get_departamentos_flow,
+    get_nao_compareceram_por_local,
     get_nao_compareceram_detalhado,
     get_atendimentos_por_hora,
     get_filter_options
@@ -184,16 +185,17 @@ def render_geral_tab(local, servico, date_from, date_to):
     df_fact = get_fact_resumo(date_from, date_to, local, servico)
     df_vagas = get_vagas_temporal(date_from, date_to, local, servico)
     df_fila = get_fila_temporal(date_from, date_to, local, servico)
-    df_nao = get_nao_compareceram_detalhado(date_from, date_to, local, servico, limit=100)
+    df_nao_grafico = get_nao_compareceram_por_local()
+    df_nao_detalhes = get_nao_compareceram_detalhado(date_from, date_to, local, servico, limit=100)
     df_hora = get_atendimentos_por_hora()
 
     fig_ocupacao = create_ocupacao_chart(df_vagas)
     fig_fila_status = create_fila_pie_chart(df_fila)
     fig_temporal = create_temporal_chart(df_fact)
-    fig_nao_por_local = create_nao_por_local_chart(df_nao)
+    fig_nao_por_local = create_nao_por_local_chart(df_nao_grafico)
     fig_hora = create_hora_chart(df_hora)
 
-    tabela_nao = create_nao_table(df_nao)
+    tabela_nao = create_nao_table(df_nao_detalhes)
 
     return html.Div([
         html.Div([
@@ -424,7 +426,7 @@ def create_temporal_chart(df):
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
         xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False)
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False, title='')
     )
 
     return fig
@@ -469,17 +471,26 @@ def create_nao_por_local_chart(df):
     if df.empty:
         return create_empty_figure()
 
-    df_agg = df.groupby(['local_servico', 'ano_mes']).size().reset_index(name='total')
+    mes_map = {
+        '2026-04': 'Abr 2026',
+        '2026-03': 'Mar 2026',
+        '2026-02': 'Fev 2026',
+        '2026-01': 'Jan 2026',
+        '2025-12': 'Dez 2025',
+        '2025-11': 'Nov 2025',
+        '2025-10': 'Out 2025'
+    }
+    df['mes'] = df['ano_mes'].map(mes_map)
 
     fig = px.bar(
-        df_agg,
+        df,
         x='local_servico',
         y='total',
-        color='ano_mes',
+        color='mes',
         title='',
-        labels={'local_servico': '', 'total': 'Não Comp.', 'ano_mes': 'Mês'},
+        labels={'local_servico': '', 'total': 'Não Comp.', 'mes': 'Mês'},
         barmode='group',
-        color_discrete_sequence=px.colors.qualitative.Set2
+        color_discrete_sequence=['#93C5FD', '#3B82F6', '#1D4ED8']
     )
 
     fig.update_layout(
@@ -490,10 +501,11 @@ def create_nao_por_local_chart(df):
         height=260,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
-        xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
+        xaxis=dict(showgrid=True, gridcolor='#f3f4f6', title=''),
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False, title='')
     )
-    fig.update_xaxes(tickangle=45)
+    fig.update_xaxes(tickangle=45, gridcolor='#f3f4f6', ticks='outside')
+    fig.update_yaxes(gridcolor='#f3f4f6', ticks='outside')
 
     return fig
 

@@ -362,6 +362,19 @@ def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=No
     query += " ORDER BY data DESC, local_servico, ordem_fluxo, ordem_status"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
+def get_nao_compareceram_por_local():
+    query = """
+    SELECT
+        local_servico,
+        ano_mes,
+        COUNT(*) AS total
+    FROM vw_bi_nao_compareceram_detalhado
+    WHERE ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '2 months', 'YYYY-MM')
+    GROUP BY local_servico, ano_mes
+    ORDER BY local_servico, ano_mes
+    """
+    return execute_query_dataframe(query)
+
 def get_nao_compareceram_detalhado(date_from=None, date_to=None, local=None, servico=None, limit=1000):
     query = """
     SELECT 
