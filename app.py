@@ -258,7 +258,6 @@ def render_departamentos_tab(local, servico, date_from, date_to):
     df_fila = get_fila_temporal(date_from, date_to, local, servico)
 
     fig_fila_dept = create_fila_por_departamento_chart(df_fila)
-    fig_fluxo = create_fluxo_chart(df_fluxo)
     fig_status_dept = create_status_por_departamento_chart(df_fluxo)
     tabela_fluxo = create_fluxo_table(df_fluxo)
 
@@ -273,13 +272,6 @@ def render_departamentos_tab(local, servico, date_from, date_to):
                 html.H3('Status por Departamento', className='chart-title'),
                 dcc.Graph(figure=fig_status_dept, config={'displayModeBar': False})
             ], className='chart-box'),
-        ], className='charts-row'),
-
-        html.Div([
-            html.Div([
-                html.H3('Fluxo de Atendimento', className='chart-title'),
-                dcc.Graph(figure=fig_fluxo, config={'displayModeBar': False})
-            ], className='chart-box-full'),
         ], className='charts-row'),
 
         html.Div([
@@ -612,22 +604,31 @@ def create_status_por_departamento_chart(df):
     if df.empty:
         return create_empty_figure()
 
-    df_agg = df.groupby(['departamento', 'status']).agg({'quantidade': 'sum'}).reset_index()
+    status_map = {
+        'waiting': 'Aguardando',
+        'calling': 'Chamando',
+        'called': 'Chamado',
+        'cancelled': 'Cancelado'
+    }
+    df['status_pt'] = df['status'].map(status_map)
 
-    fig = px.sunburst(
+    df_agg = df.groupby('status_pt').agg({'quantidade': 'sum'}).reset_index()
+
+    fig = px.pie(
         df_agg,
-        path=['departamento', 'status'],
         values='quantidade',
+        names='status_pt',
         title='',
-        color='quantidade',
-        color_continuous_scale='Blues'
+        color_discrete_sequence=['#8B5CF6', '#3B82F6', '#10B981', '#EF4444']
     )
 
     fig.update_layout(
         paper_bgcolor='white',
         font=dict(color='#374151'),
         margin=dict(l=10, r=10, t=10, b=10),
-        height=300
+        height=280,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
     )
 
     return fig
