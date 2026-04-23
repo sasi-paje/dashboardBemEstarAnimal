@@ -383,36 +383,34 @@ def create_temporal_chart(df):
     }).reset_index()
     df_grouped = df_grouped.sort_values('data')
 
-    fig = go.Figure()
+    df_melt = df_grouped.melt(
+        id_vars=['data', 'local_servico'],
+        value_vars=['total_vagas', 'vagas_ocupadas', 'nao_compareceram'],
+        var_name='tipo',
+        value_name='quantidade'
+    )
 
-    fig.add_trace(go.Scatter(
-        x=df_grouped['data'],
-        y=df_grouped['total_vagas'],
-        name='Total Vagas',
-        mode='lines+markers',
-        line=dict(color='#3B82F6', width=2.5),
-        marker=dict(size=6),
-        fill='tozeroy',
-        fillcolor='rgba(59, 130, 246, 0.1)'
-    ))
+    tipo_map = {
+        'total_vagas': 'Total Vagas',
+        'vagas_ocupadas': 'Ocupadas',
+        'nao_compareceram': 'Não Comp.'
+    }
+    df_melt['tipo'] = df_melt['tipo'].map(tipo_map)
 
-    fig.add_trace(go.Scatter(
-        x=df_grouped['data'],
-        y=df_grouped['vagas_ocupadas'],
-        name='Ocupadas',
-        mode='lines+markers',
-        line=dict(color='#10B981', width=2.5),
-        marker=dict(size=6)
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=df_grouped['data'],
-        y=df_grouped['nao_compareceram'],
-        name='Não Comp.',
-        mode='lines+markers',
-        line=dict(color='#EF4444', width=2, dash='dash'),
-        marker=dict(size=6)
-    ))
+    fig = px.bar(
+        df_melt,
+        x='data',
+        y='quantidade',
+        color='tipo',
+        title='',
+        labels={'data': '', 'quantidade': 'Quantidade', 'tipo': ''},
+        barmode='group',
+        color_discrete_map={
+            'Total Vagas': '#3B82F6',
+            'Ocupadas': '#10B981',
+            'Não Comp.': '#EF4444'
+        }
+    )
 
     fig.update_layout(
         paper_bgcolor='white',
@@ -420,11 +418,10 @@ def create_temporal_chart(df):
         font=dict(color='#374151'),
         margin=dict(l=10, r=10, t=10, b=10),
         height=280,
-        xaxis=dict(title='', showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(title='Quantidade', showgrid=True, gridcolor='#f3f4f6'),
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
-        hovermode='x unified'
+        xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
     )
 
     return fig
