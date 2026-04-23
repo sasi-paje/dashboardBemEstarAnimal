@@ -434,25 +434,32 @@ def create_hora_chart(df):
     if df.empty:
         return create_empty_figure()
 
-    fig = px.bar(
-        df,
-        x='hora',
-        y='total_chamados',
-        title='',
-        labels={'hora': 'Hora', 'total_chamados': 'Chamados'},
-        color='total_chamados',
-        color_continuous_scale='Blues'
-    )
+    total = int(df['total_chamados'].sum())
+
+    fig = go.Figure(go.Indicator(
+        mode='gauge+number',
+        value=total,
+        number={'font': {'size': 36, 'color': '#374151'}},
+        gauge={
+            'axis': {'range': [0, 50], 'tickwidth': 1, 'tickcolor': '#374151'},
+            'bar': {'color': '#3B82F6'},
+            'steps': [
+                {'range': [0, 35], 'color': '#EF4444'},
+                {'range': [35, 45], 'color': '#F59E0B'},
+                {'range': [45, 50], 'color': '#10B981'}
+            ],
+            'threshold': {
+                'line': {'color': '#374151', 'width': 4},
+                'value': 50
+            }
+        }
+    ))
 
     fig.update_layout(
         paper_bgcolor='white',
-        plot_bgcolor='white',
         font=dict(color='#374151'),
         margin=dict(l=10, r=10, t=10, b=10),
-        height=260,
-        showlegend=False,
-        xaxis=dict(title='Hora do Dia', showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(title='Total de Chamados', showgrid=True, gridcolor='#f3f4f6')
+        height=280
     )
 
     return fig
