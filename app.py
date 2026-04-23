@@ -117,6 +117,18 @@ app.layout = html.Div([
             ], className='filter-group'),
 
             html.Div([
+                html.Label('Departamento', className='filter-label'),
+                dcc.Dropdown(
+                    id='filtro-departamento',
+                    options=[{'label': d, 'value': d} for d in departamentos],
+                    value=None,
+                    placeholder='Selecione',
+                    clearable=True,
+                    className='filter-dropdown'
+                )
+            ], className='filter-group'),
+
+            html.Div([
                 html.Label('Periodo', className='filter-label'),
                 dcc.DatePickerRange(
                     id='date-picker',
@@ -162,10 +174,11 @@ app.layout = html.Div([
      Input('interval-component', 'n_intervals'),
      Input('filtro-local', 'value'),
      Input('filtro-servico', 'value'),
+     Input('filtro-departamento', 'value'),
      Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date')]
 )
-def render_tab_content(selected_tab, n_clicks, n_intervals, local, servico, date_from, date_to):
+def render_tab_content(selected_tab, n_clicks, n_intervals, local, servico, departamento, date_from, date_to):
     now = datetime.now()
     datetime_str = now.strftime('%d/%m/%Y %H:%M')
 
@@ -177,7 +190,7 @@ def render_tab_content(selected_tab, n_clicks, n_intervals, local, servico, date
     if selected_tab == 'tab-geral':
         return render_geral_tab(local, servico, date_from, date_to), datetime_str
     else:
-        return render_departamentos_tab(local, servico, date_from, date_to), datetime_str
+        return render_departamentos_tab(local, servico, departamento, date_from, date_to), datetime_str
 
 
 def render_geral_tab(local, servico, date_from, date_to):
@@ -253,9 +266,9 @@ def render_geral_tab(local, servico, date_from, date_to):
     ])
 
 
-def render_departamentos_tab(local, servico, date_from, date_to):
+def render_departamentos_tab(local, servico, departamento, date_from, date_to):
     df_fluxo = get_fluxo_departamentos(date_from, date_to, local, servico)
-    df_fila = get_fila_temporal(date_from, date_to, local, servico)
+    df_fila = get_fila_temporal(date_from, date_to, local, servico, departamento)
 
     fig_fila_dept = create_fila_por_departamento_chart(df_fila)
     fig_status_dept = create_status_por_departamento_chart(df_fila)
