@@ -326,10 +326,10 @@ def create_ocupacao_chart(df):
         font=dict(color='#374151', size=12),
         margin=dict(l=10, r=10, t=10, b=10),
         height=280,
-        showlegend=False,
-        legend=None,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
         xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False)
     )
     fig.update_xaxes(tickangle=45, gridcolor='#f3f4f6', ticks='outside')
     fig.update_yaxes(gridcolor='#f3f4f6', ticks='outside')
@@ -422,9 +422,10 @@ def create_temporal_chart(df):
         font=dict(color='#374151'),
         margin=dict(l=10, r=10, t=10, b=10),
         height=280,
-        showlegend=False,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
         xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False)
     )
 
     return fig
