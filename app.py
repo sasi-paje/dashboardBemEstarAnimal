@@ -258,7 +258,7 @@ def render_departamentos_tab(local, servico, date_from, date_to):
     df_fila = get_fila_temporal(date_from, date_to, local, servico)
 
     fig_fila_dept = create_fila_por_departamento_chart(df_fila)
-    fig_status_dept = create_status_por_departamento_chart(df_fluxo)
+    fig_status_dept = create_status_por_departamento_chart(df_fila)
     tabela_fluxo = create_fluxo_table(df_fluxo)
 
     return html.Div([
@@ -604,15 +604,27 @@ def create_status_por_departamento_chart(df):
     if df.empty:
         return create_empty_figure()
 
+    status_col = 'status_fila' if 'status_fila' in df.columns else 'status'
+    if status_col not in df.columns or 'quantidade' not in df.columns:
+        return create_empty_figure()
+
+    status_vals = df[status_col].dropna().unique()
+    valid_statuses = ['waiting', 'calling', 'called', 'cancelled']
+    has_valid = any(s in valid_statuses for s in status_vals)
+    if not has_valid:
+        return create_empty_figure()
+
     status_map = {
         'waiting': 'Aguardando',
         'calling': 'Chamando',
         'called': 'Chamado',
         'cancelled': 'Cancelado'
     }
-    df['status_pt'] = df['status'].map(status_map)
 
-    df_agg = df.groupby('status_pt').agg({'quantidade': 'sum'}).reset_index()
+    df_filtered = df[df[status_col].isin(valid_statuses)].copy()
+    df_filtered['status_pt'] = df_filtered[status_col].map(status_map)
+
+    df_agg = df_filtered.groupby('status_pt', as_index=False)['quantidade'].sum()
 
     fig = px.pie(
         df_agg,
