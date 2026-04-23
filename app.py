@@ -356,7 +356,6 @@ def create_fila_pie_chart(df):
         values='quantidade',
         names='status_fila',
         title='',
-        hole=0.5,
         color_discrete_sequence=['#8B5CF6', '#3B82F6', '#10B981', '#EF4444']
     )
 
