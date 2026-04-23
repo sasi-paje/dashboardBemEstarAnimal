@@ -88,7 +88,6 @@ HEADER = html.Div([
 
 app.layout = html.Div([
     dcc.Store(id='last-update', data=None),
-    HEADER,
 
     html.Div([
         html.Div([
@@ -142,6 +141,16 @@ app.layout = html.Div([
             html.Div([
                 html.Label('', className='filter-label'),
                 dbc.Button(
+                    'Limpar Filtros',
+                    id='btn-clear',
+                    color='secondary',
+                    className='btn-clear'
+                )
+            ], className='filter-group'),
+
+            html.Div([
+                html.Label('', className='filter-label'),
+                dbc.Button(
                     [html.Span('↻'), ' Atualizar'],
                     id='btn-refresh',
                     color='primary',
@@ -168,9 +177,14 @@ app.layout = html.Div([
 
 @callback(
     Output('tab-content', 'children'),
-    Output('current-datetime', 'children'),
+    Output('filtro-local', 'value'),
+    Output('filtro-servico', 'value'),
+    Output('filtro-departamento', 'value'),
+    Output('date-picker', 'start_date'),
+    Output('date-picker', 'end_date'),
     [Input('tabs', 'value'),
      Input('btn-refresh', 'n_clicks'),
+     Input('btn-clear', 'n_clicks'),
      Input('interval-component', 'n_intervals'),
      Input('filtro-local', 'value'),
      Input('filtro-servico', 'value'),
@@ -178,19 +192,16 @@ app.layout = html.Div([
      Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date')]
 )
-def render_tab_content(selected_tab, n_clicks, n_intervals, local, servico, departamento, date_from, date_to):
-    now = datetime.now()
-    datetime_str = now.strftime('%d/%m/%Y %H:%M')
-
+def render_tab_content(selected_tab, n_clicks_refresh, n_clicks_clear, n_intervals, local, servico, departamento, date_from, date_to):
     if date_from is None or date_from == '':
         date_from = None
     if date_to is None or date_to == '':
         date_to = None
 
     if selected_tab == 'tab-geral':
-        return render_geral_tab(local, servico, date_from, date_to), datetime_str
+        return render_geral_tab(local, servico, date_from, date_to), None, None, None, one_month_ago, today
     else:
-        return render_departamentos_tab(local, servico, departamento, date_from, date_to), datetime_str
+        return render_departamentos_tab(local, servico, departamento, date_from, date_to), None, None, None, one_month_ago, today
 
 
 def render_geral_tab(local, servico, date_from, date_to):
