@@ -342,6 +342,14 @@ def create_fila_pie_chart(df):
 
     df_agg = df.groupby(['status_fila']).agg({'quantidade': 'sum'}).reset_index()
 
+    status_map = {
+        'waiting': 'Aguardando',
+        'calling': 'Chamando',
+        'called': 'Chamado',
+        'cancelled': 'Cancelado'
+    }
+    df_agg['status_fila'] = df_agg['status_fila'].map(status_map)
+
     fig = px.pie(
         df_agg,
         values='quantidade',
@@ -542,6 +550,14 @@ def create_fila_por_departamento_chart(df):
 
     df_agg = df.groupby(['departamento', 'status_fila']).agg({'quantidade': 'sum'}).reset_index()
 
+    status_map = {
+        'waiting': 'Aguardando',
+        'calling': 'Chamando',
+        'called': 'Chamado',
+        'cancelled': 'Cancelado'
+    }
+    df_agg['status_fila'] = df_agg['status_fila'].map(status_map)
+
     fig = px.bar(
         df_agg,
         x='departamento',
@@ -551,10 +567,10 @@ def create_fila_por_departamento_chart(df):
         labels={'departamento': '', 'quantidade': 'Pessoas', 'status_fila': 'Status'},
         barmode='group',
         color_discrete_map={
-            'waiting': '#8B5CF6',
-            'calling': '#3B82F6',
-            'called': '#10B981',
-            'cancelled': '#EF4444'
+            'Aguardando': '#8B5CF6',
+            'Chamando': '#3B82F6',
+            'Chamado': '#10B981',
+            'Cancelado': '#EF4444'
         }
     )
 
@@ -637,15 +653,24 @@ def create_fluxo_table(df):
     df_display = df[[c for c in columns_to_show if c in df.columns]].copy()
     df_display = df_display.sort_values(['ordem_fluxo', 'status'])
 
+    status_map = {
+        'waiting': 'Aguardando',
+        'calling': 'Chamando',
+        'called': 'Chamado',
+        'cancelled': 'Cancelado'
+    }
+    if 'status' in df_display.columns:
+        df_display['status'] = df_display['status'].map(status_map)
+
     columns_renamed = {
         'departamento': 'Departamento',
         'ordem_fluxo': 'Ordem',
         'status': 'Status',
         'quantidade': 'Total',
-        'qtd_waiting': 'Waiting',
-        'qtd_calling': 'Calling',
-        'qtd_called': 'Called',
-        'qtd_cancelled': 'Cancelled'
+        'qtd_waiting': 'Aguardando',
+        'qtd_calling': 'Chamando',
+        'qtd_called': 'Chamado',
+        'qtd_cancelled': 'Cancelado'
     }
     df_display = df_display.rename(columns=columns_renamed)
 
