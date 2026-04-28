@@ -31,7 +31,6 @@ app = dash.Dash(
 locais, servicos, departamentos = get_filter_options()
 
 today = datetime.now().strftime('%Y-%m-%d')
-one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
 
 def format_number(num):
@@ -131,7 +130,7 @@ app.layout = html.Div([
                 html.Label('Periodo', className='filter-label'),
                 dcc.DatePickerRange(
                     id='date-picker',
-                    start_date=one_month_ago,
+                    start_date=today,
                     end_date=today,
                     display_format='DD/MM/YYYY',
                     className='filter-datepicker'
@@ -199,12 +198,17 @@ def render_tab_content(selected_tab, n_clicks_refresh, n_clicks_clear, n_interva
         date_to = None
 
     if selected_tab == 'tab-geral':
-        return render_geral_tab(local, servico, date_from, date_to), None, None, None, one_month_ago, today
+        return render_geral_tab(local, servico, date_from, date_to), None, None, None, today, today
     else:
-        return render_departamentos_tab(local, servico, departamento, date_from, date_to), None, None, None, one_month_ago, today
+        return render_departamentos_tab(local, servico, departamento, date_from, date_to), None, None, None, today, today
 
 
 def render_geral_tab(local, servico, date_from, date_to):
+    if date_from is None or date_from == '':
+        date_from = today
+    if date_to is None or date_to == '':
+        date_to = today
+
     kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
     df_fact = get_fact_resumo(date_from, date_to, local, servico)
     df_vagas = get_vagas_temporal(date_from, date_to, local, servico)

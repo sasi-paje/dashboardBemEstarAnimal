@@ -175,6 +175,7 @@ python-dotenv
 - [28/Abr/2026] — Connection pooling com psycopg2.ThreadedConnectionPool (minconn=3, maxconn=10)
 - [28/Abr/2026] — Locking thread-safe para acesso ao pool de conexões
 - [28/Abr/2026] — Limite de 12 meses para `get_nao_compareceram_por_local()`
+- [28/Abr/2026] — Filtro de data padrão = hoje (não mais 30 dias atrás)
 
 ## Problemas Conhecidos
 - Tabela `cfg_service_department_status` usa colunas com prefixo `id_` (ex: `id_service_department`)
