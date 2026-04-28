@@ -172,6 +172,9 @@ python-dotenv
 - [15/Abr/2026] — Auto-refresh a cada 30 minutos + botão manual
 - [15/Abr/2026] — Média/Hora calculada usando `call_time` de `sk_call_queue`
 - [15/Abr/2026] — Não-comparecimentos filtrados por `service_date`
+- [28/Abr/2026] — Connection pooling com psycopg2.ThreadedConnectionPool (minconn=3, maxconn=10)
+- [28/Abr/2026] — Locking thread-safe para acesso ao pool de conexões
+- [28/Abr/2026] — Limite de 12 meses para `get_nao_compareceram_por_local()`
 
 ## Problemas Conhecidos
 - Tabela `cfg_service_department_status` usa colunas com prefixo `id_` (ex: `id_service_department`)

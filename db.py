@@ -1,19 +1,43 @@
 import os
 import json
+import threading
 import pandas as pd
 from psycopg2 import connect
+from psycopg2.pool import ThreadedConnectionPool
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_pool = None
+_pool_lock = threading.Lock()
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = ThreadedConnectionPool(
+                    minconn=3,
+                    maxconn=10,
+                    host=os.getenv("HOST_DEV"),
+                    port=os.getenv("PORT_DEV"),
+                    dbname=os.getenv("DB_NAME_DEV"),
+                    user=os.getenv("DB_USER_DEV"),
+                    password=os.getenv("DB_PASSWORD_DEV"),
+                )
+    return _pool
+
+_connection_lock = threading.Lock()
+
 def get_connection():
-    return connect(
-        host=os.getenv("HOST_DEV"),
-        port=os.getenv("PORT_DEV"),
-        dbname=os.getenv("DB_NAME_DEV"),
-        user=os.getenv("DB_USER_DEV"),
-        password=os.getenv("DB_PASSWORD_DEV"),
-    )
+    with _connection_lock:
+        pool = _get_pool()
+        return pool.getconn()
+
+def _return_connection(conn):
+    with _connection_lock:
+        pool = _get_pool()
+        pool.putconn(conn)
 
 def execute_query(query, params=None):
     conn = get_connection()
@@ -24,7 +48,7 @@ def execute_query(query, params=None):
                 return cur.fetchall()
             conn.commit()
     finally:
-        conn.close()
+        _return_connection(conn)
 
 def execute_query_dataframe(query, params=None):
     conn = get_connection()
@@ -37,7 +61,7 @@ def execute_query_dataframe(query, params=None):
                 return pd.DataFrame(rows, columns=columns)
             conn.commit()
     finally:
-        conn.close()
+        _return_connection(conn)
 
 def get_bookings_overview(local=None, servico=None, departamento=None, date_from=None, date_to=None):
     conn = get_connection()
@@ -56,7 +80,7 @@ def get_bookings_overview(local=None, servico=None, departamento=None, date_from
                     return pd.DataFrame([data])
             return pd.DataFrame()
     finally:
-        conn.close()
+        _return_connection(conn)
 
 QUERY_VAGAS = """
 SELECT
@@ -212,7 +236,7 @@ def get_filter_options():
 
             return locais, servicos, departamentos
     finally:
-        conn.close()
+        _return_connection(conn)
 
 # ============================================
 # Novas funções para Views BI temporais
@@ -369,7 +393,7 @@ def get_nao_compareceram_por_local():
         ano_mes,
         COUNT(*) AS total
     FROM vw_bi_nao_compareceram_detalhado
-    WHERE ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '2 months', 'YYYY-MM')
+    WHERE ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '12 months', 'YYYY-MM')
     GROUP BY local_servico, ano_mes
     ORDER BY local_servico, ano_mes
     """
