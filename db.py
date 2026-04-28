@@ -244,7 +244,7 @@ def get_filter_options():
 
 def get_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
     query = """
-    SELECT 
+    SELECT
         f.data,
         f.site_service_id,
         dl.local_servico,
@@ -278,12 +278,12 @@ def get_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
     if servico:
         query += " AND dl.servico = %s"
         params.append(servico)
-    query += " ORDER BY f.data DESC, dl.local_servico"
+    query += " ORDER BY f.data DESC, dl.local_servico LIMIT 500"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_vagas_temporal(date_from=None, date_to=None, local=None, servico=None):
     query = """
-    SELECT 
+    SELECT
         data,
         site_service_id,
         local_servico,
@@ -310,12 +310,12 @@ def get_vagas_temporal(date_from=None, date_to=None, local=None, servico=None):
     if servico:
         query += " AND servico = %s"
         params.append(servico)
-    query += " ORDER BY data DESC, local_servico"
+    query += " ORDER BY data DESC, local_servico LIMIT 500"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_fila_temporal(date_from=None, date_to=None, local=None, servico=None, departamento=None):
     query = """
-    SELECT 
+    SELECT
         data,
         site_service_id,
         local_servico,
@@ -343,12 +343,12 @@ def get_fila_temporal(date_from=None, date_to=None, local=None, servico=None, de
     if departamento:
         query += " AND departamento = %s"
         params.append(departamento)
-    query += " ORDER BY data DESC, local_servico, departamento"
+    query += " ORDER BY data DESC, local_servico, departamento LIMIT 500"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=None):
     query = """
-    SELECT 
+    SELECT
         data,
         site_service_id,
         local_servico,
@@ -383,7 +383,7 @@ def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=No
     if servico:
         query += " AND servico = %s"
         params.append(servico)
-    query += " ORDER BY data DESC, local_servico, ordem_fluxo, ordem_status"
+    query += " ORDER BY data DESC, local_servico, ordem_fluxo, ordem_status LIMIT 500"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_nao_compareceram_por_local(date_from=None, date_to=None):
@@ -462,7 +462,7 @@ def get_dim_date(date_from=None, date_to=None):
     if date_to:
         query += " AND data <= %s"
         params.append(date_to)
-    query += " ORDER BY data DESC"
+    query += " ORDER BY data DESC LIMIT 1000"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_atendimentos_por_hora(date_from=None, date_to=None):
@@ -492,7 +492,7 @@ def get_tempo_medio(date_from=None, date_to=None):
     if date_to:
         query += " AND data <= %s"
         params.append(date_to)
-    query += " ORDER BY data DESC, local_servico"
+    query += " ORDER BY data DESC, local_servico LIMIT 500"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
