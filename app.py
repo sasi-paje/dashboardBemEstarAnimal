@@ -213,7 +213,7 @@ def render_geral_tab(local, servico, date_from, date_to):
     df_fact = get_fact_resumo(date_from, date_to, local, servico)
     df_vagas = get_vagas_temporal(date_from, date_to, local, servico)
     df_fila = get_fila_temporal(date_from, date_to, local, servico)
-    df_nao_grafico = get_nao_compareceram_por_local()
+    df_nao_grafico = get_nao_compareceram_por_local(date_from, date_to)
     df_nao_detalhes = get_nao_compareceram_detalhado(date_from, date_to, local, servico, 100)
     df_hora = get_atendimentos_por_hora()
 

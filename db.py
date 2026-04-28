@@ -386,18 +386,26 @@ def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=No
     query += " ORDER BY data DESC, local_servico, ordem_fluxo, ordem_status"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
-def get_nao_compareceram_por_local():
+def get_nao_compareceram_por_local(date_from=None, date_to=None):
     query = """
     SELECT
         local_servico,
         ano_mes,
         COUNT(*) AS total
     FROM vw_bi_nao_compareceram_detalhado
-    WHERE ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '12 months', 'YYYY-MM')
-    GROUP BY local_servico, ano_mes
-    ORDER BY local_servico, ano_mes
+    WHERE 1=1
     """
-    return execute_query_dataframe(query)
+    params = []
+    if date_from:
+        query += " AND data_agendamento >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND data_agendamento <= %s"
+        params.append(date_to)
+    else:
+        query += " AND ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '12 months', 'YYYY-MM')"
+    query += " GROUP BY local_servico, ano_mes ORDER BY local_servico, ano_mes LIMIT 100"
+    return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_nao_compareceram_detalhado(date_from=None, date_to=None, local=None, servico=None, limit=1000):
     query = """
@@ -443,7 +451,7 @@ def get_nao_compareceram_detalhado(date_from=None, date_to=None, local=None, ser
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_dim_local():
-    return execute_query_dataframe("SELECT * FROM vw_bi_dim_local ORDER BY local_servico")
+    return execute_query_dataframe("SELECT * FROM vw_bi_dim_local WHERE active = true ORDER BY local_servico LIMIT 1000")
 
 def get_dim_date(date_from=None, date_to=None):
     query = "SELECT * FROM vw_bi_dim_date WHERE 1=1"
@@ -457,7 +465,7 @@ def get_dim_date(date_from=None, date_to=None):
     query += " ORDER BY data DESC"
     return execute_query_dataframe(query, tuple(params) if params else None)
 
-def get_atendimentos_por_hora():
+def get_atendimentos_por_hora(date_from=None, date_to=None):
     return execute_query_dataframe("SELECT * FROM vw_bi_atendimentos_por_hora ORDER BY hora")
 
 def get_tempo_medio(date_from=None, date_to=None):
@@ -488,8 +496,38 @@ def get_tempo_medio(date_from=None, date_to=None):
     return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
-    df = get_fact_resumo(date_from, date_to, local, servico)
-    if df.empty:
+    query = """
+    SELECT
+        COALESCE(SUM(f.total_vagas), 0) AS total_vagas,
+        COALESCE(SUM(f.vagas_ocupadas), 0) AS vagas_ocupadas,
+        COALESCE(SUM(f.vagas_nao_confirmadas), 0) AS vagas_livres,
+        COALESCE(AVG(f.taxa_ocupacao_pct), 0) AS taxa_ocupacao,
+        COALESCE(SUM(f.em_fila), 0) AS em_fila,
+        COALESCE(SUM(f.waiting), 0) AS waiting,
+        COALESCE(SUM(f.calling), 0) AS calling,
+        COALESCE(SUM(f.called), 0) AS called,
+        COALESCE(SUM(f.nao_compareceram), 0) AS nao_compareceram
+    FROM vw_bi_fact_resumo f
+    JOIN vw_bi_dim_local dl ON f.site_service_id = dl.site_service_id
+    WHERE 1=1
+    """
+    params = []
+    if date_from:
+        query += " AND f.data >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND f.data <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND dl.local_servico = %s"
+        params.append(local)
+    if servico:
+        query += " AND dl.servico = %s"
+        params.append(servico)
+
+    df = execute_query_dataframe(query, tuple(params) if params else None)
+
+    if df.empty or df.iloc[0]['total_vagas'] is None:
         return {
             'total_vagas': 0,
             'vagas_ocupadas': 0,
@@ -501,17 +539,17 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None)
             'called': 0,
             'nao_compareceram': 0
         }
-    
+
     return {
-        'total_vagas': int(df['total_vagas'].sum()),
-        'vagas_ocupadas': int(df['vagas_ocupadas'].sum()),
-        'vagas_livres': int(df['vagas_nao_confirmadas'].sum()),
-        'taxa_ocupacao': round(df['taxa_ocupacao_pct'].mean(), 1) if len(df) > 0 else 0,
-        'em_fila': int(df['em_fila'].sum()),
-        'waiting': int(df['waiting'].sum()),
-        'calling': int(df['calling'].sum()),
-        'called': int(df['called'].sum()),
-        'nao_compareceram': int(df['nao_compareceram'].sum())
+        'total_vagas': int(df.iloc[0]['total_vagas']),
+        'vagas_ocupadas': int(df.iloc[0]['vagas_ocupadas']),
+        'vagas_livres': int(df.iloc[0]['vagas_livres']),
+        'taxa_ocupacao': round(float(df.iloc[0]['taxa_ocupacao']), 1),
+        'em_fila': int(df.iloc[0]['em_fila']),
+        'waiting': int(df.iloc[0]['waiting']),
+        'calling': int(df.iloc[0]['calling']),
+        'called': int(df.iloc[0]['called']),
+        'nao_compareceram': int(df.iloc[0]['nao_compareceram'])
     }
 
 def get_departamentos_flow(date_from=None, date_to=None, local=None):

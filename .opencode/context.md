@@ -176,6 +176,10 @@ python-dotenv
 - [28/Abr/2026] — Locking thread-safe para acesso ao pool de conexões
 - [28/Abr/2026] — Limite de 12 meses para `get_nao_compareceram_por_local()`
 - [28/Abr/2026] — Filtro de data padrão = hoje (não mais 30 dias atrás)
+- [28/Abr/2026] — Otimização queries: get_kpis_fact_resumo com agregação SQL
+- [28/Abr/2026] — get_nao_compareceram_por_local() com date_from/date_to e LIMIT 100
+- [28/Abr/2026] — get_atendimentos_por_hora() com date_from/date_to e LIMIT 24
+- [28/Abr/2026] — get_dim_local() com WHERE active=true e LIMIT 1000
 
 ## Problemas Conhecidos
 - Tabela `cfg_service_department_status` usa colunas com prefixo `id_` (ex: `id_service_department`)
