@@ -771,6 +771,6 @@ def create_fluxo_table(df):
         sort_action='native',
     )
 
-
+app = app.server
 if __name__ == '__main__':
     app.run(debug=False,  port=8050)
