@@ -176,11 +176,6 @@ app.layout = html.Div([
 
 @callback(
     Output('tab-content', 'children'),
-    Output('filtro-local', 'value'),
-    Output('filtro-servico', 'value'),
-    Output('filtro-departamento', 'value'),
-    Output('date-picker', 'start_date'),
-    Output('date-picker', 'end_date'),
     [Input('tabs', 'value'),
      Input('btn-refresh', 'n_clicks'),
      Input('btn-clear', 'n_clicks'),
@@ -198,9 +193,23 @@ def render_tab_content(selected_tab, n_clicks_refresh, n_clicks_clear, n_interva
         date_to = None
 
     if selected_tab == 'tab-geral':
-        return render_geral_tab(local, servico, date_from, date_to), None, None, None, today, today
+        return render_geral_tab(local, servico, date_from, date_to)
     else:
-        return render_departamentos_tab(local, servico, departamento, date_from, date_to), None, None, None, today, today
+        return render_departamentos_tab(local, servico, departamento, date_from, date_to)
+
+
+@callback(
+    [Output('filtro-local', 'value'),
+     Output('filtro-servico', 'value'),
+     Output('filtro-departamento', 'value'),
+     Output('date-picker', 'start_date'),
+     Output('date-picker', 'end_date')],
+    Input('btn-clear', 'n_clicks')
+)
+def clear_filters(n_clicks):
+    if n_clicks and n_clicks > 0:
+        return None, None, None, today, today
+    return dash.no_update
 
 
 def render_geral_tab(local, servico, date_from, date_to):
