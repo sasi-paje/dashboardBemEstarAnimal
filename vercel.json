@@ -1,0 +1,30 @@
+{
+  "builds": [
+    {
+      "src": "wsgi.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/_dash-update-component", 
+      "dest": "wsgi.py"
+    },
+    {
+      "src": "/_dash-component-suites", 
+      "dest": "wsgi.py"
+    },
+    {
+      "src": "/_dash-layout", 
+      "dest": "wsgi.py"
+    },
+    {
+      "src": "/favicon.ico", 
+      "dest": "wsgi.py"
+    },
+    {
+      "src": "/(.*)", 
+      "dest": "wsgi.py"
+    }
+  ]
+}
