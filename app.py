@@ -28,8 +28,6 @@ app = dash.Dash(
     suppress_callback_exceptions=True
 )
 
-locais, servicos, departamentos = get_filter_options()
-
 today = datetime.now().strftime('%Y-%m-%d')
 
 
@@ -87,6 +85,7 @@ HEADER = html.Div([
 
 app.layout = html.Div([
     dcc.Store(id='last-update', data=None),
+    dcc.Store(id='filter-options', data=None),
 
     html.Div([
         html.Div([
@@ -94,7 +93,7 @@ app.layout = html.Div([
                 html.Label('Local', className='filter-label'),
                 dcc.Dropdown(
                     id='filtro-local',
-                    options=[{'label': l, 'value': l} for l in locais],
+                    options=[],
                     value=None,
                     placeholder='Selecione',
                     clearable=True,
@@ -106,7 +105,7 @@ app.layout = html.Div([
                 html.Label('Servico', className='filter-label'),
                 dcc.Dropdown(
                     id='filtro-servico',
-                    options=[{'label': s, 'value': s} for s in servicos],
+                    options=[],
                     value=None,
                     placeholder='Selecione',
                     clearable=True,
@@ -118,7 +117,7 @@ app.layout = html.Div([
                 html.Label('Departamento', className='filter-label'),
                 dcc.Dropdown(
                     id='filtro-departamento',
-                    options=[{'label': d, 'value': d} for d in departamentos],
+                    options=[],
                     value=None,
                     placeholder='Selecione',
                     clearable=True,
@@ -172,6 +171,27 @@ app.layout = html.Div([
         n_intervals=0
     )
 ], className='app-container')
+
+
+@app.callback(
+    [Output('filtro-local', 'options'),
+     Output('filtro-servico', 'options'),
+     Output('filtro-departamento', 'options'),
+     Output('filter-options', 'data')],
+    Input('tabs', 'value')
+)
+def load_filter_options(selected_tab):
+    try:
+        locais, servicos, departamentos = get_filter_options()
+        return (
+            [{'label': l, 'value': l} for l in locais],
+            [{'label': s, 'value': s} for s in servicos],
+            [{'label': d, 'value': d} for d in departamentos],
+            {'locais': locais, 'servicos': servicos, 'departamentos': departamentos}
+        )
+    except Exception as e:
+        print(f"Error loading filter options: {e}")
+        return [], [], [], None
 
 
 @callback(

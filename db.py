@@ -16,15 +16,20 @@ def _get_pool():
     if _pool is None:
         with _pool_lock:
             if _pool is None:
-                _pool = ThreadedConnectionPool(
-                    minconn=3,
-                    maxconn=10,
-                    host=os.getenv("HOST_DEV"),
-                    port=os.getenv("PORT_DEV"),
-                    dbname=os.getenv("DB_NAME_DEV"),
-                    user=os.getenv("DB_USER_DEV"),
-                    password=os.getenv("DB_PASSWORD_DEV"),
-                )
+                try:
+                    _pool = ThreadedConnectionPool(
+                        minconn=1,
+                        maxconn=5,
+                        host=os.getenv("HOST_DEV"),
+                        port=os.getenv("PORT_DEV"),
+                        dbname=os.getenv("DB_NAME_DEV"),
+                        user=os.getenv("DB_USER_DEV"),
+                        password=os.getenv("DB_PASSWORD_DEV"),
+                    )
+                except Exception as e:
+                    print(f"Pool creation failed: {e}")
+                    _pool = None
+                    raise
     return _pool
 
 _connection_lock = threading.Lock()
@@ -32,7 +37,21 @@ _connection_lock = threading.Lock()
 def get_connection():
     with _connection_lock:
         pool = _get_pool()
-        return pool.getconn()
+        try:
+            conn = pool.getconn()
+            return conn
+        except Exception as e:
+            print(f"Error getting connection: {e}")
+            raise
+
+def get_connection_simple():
+    return connect(
+        host=os.getenv("HOST_DEV"),
+        port=os.getenv("PORT_DEV"),
+        dbname=os.getenv("DB_NAME_DEV"),
+        user=os.getenv("DB_USER_DEV"),
+        password=os.getenv("DB_PASSWORD_DEV"),
+    )
 
 def _return_connection(conn):
     with _connection_lock:
@@ -50,6 +69,17 @@ def execute_query(query, params=None):
     finally:
         _return_connection(conn)
 
+def execute_query_simple(query, params=None):
+    conn = get_connection_simple()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            if cur.description:
+                return cur.fetchall()
+            conn.commit()
+    finally:
+        conn.close()
+
 def execute_query_dataframe(query, params=None):
     conn = get_connection()
     try:
@@ -62,6 +92,19 @@ def execute_query_dataframe(query, params=None):
             conn.commit()
     finally:
         _return_connection(conn)
+
+def execute_query_dataframe_simple(query, params=None):
+    conn = get_connection_simple()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            if cur.description:
+                columns = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                return pd.DataFrame(rows, columns=columns)
+            conn.commit()
+    finally:
+        conn.close()
 
 def get_bookings_overview(local=None, servico=None, departamento=None, date_from=None, date_to=None):
     conn = get_connection()
@@ -222,21 +265,25 @@ def get_kpis(local=None, servico=None, departamento=None, date_from=None, date_t
     }
 
 def get_filter_options():
-    conn = get_connection()
     try:
-        with conn.cursor() as cur:
-            cur.execute(QUERY_LOCAIS)
-            locais = [r[0] for r in cur.fetchall()]
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_LOCAIS)
+                locais = [r[0] for r in cur.fetchall()]
 
-            cur.execute(QUERY_SERVICOS)
-            servicos = [r[0] for r in cur.fetchall()]
+                cur.execute(QUERY_SERVICOS)
+                servicos = [r[0] for r in cur.fetchall()]
 
-            cur.execute(QUERY_DEPARTAMENTOS)
-            departamentos = [r[0] for r in cur.fetchall()]
+                cur.execute(QUERY_DEPARTAMENTOS)
+                departamentos = [r[0] for r in cur.fetchall()]
 
-            return locais, servicos, departamentos
-    finally:
-        _return_connection(conn)
+                return locais, servicos, departamentos
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_filter_options: {e}")
+        return [], [], []
 
 # ============================================
 # Novas funções para Views BI temporais
@@ -279,7 +326,11 @@ def get_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
         query += " AND dl.servico = %s"
         params.append(servico)
     query += " ORDER BY f.data DESC, dl.local_servico LIMIT 500"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_fact_resumo, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_vagas_temporal(date_from=None, date_to=None, local=None, servico=None):
     query = """
@@ -311,7 +362,11 @@ def get_vagas_temporal(date_from=None, date_to=None, local=None, servico=None):
         query += " AND servico = %s"
         params.append(servico)
     query += " ORDER BY data DESC, local_servico LIMIT 500"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_vagas_temporal, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_fila_temporal(date_from=None, date_to=None, local=None, servico=None, departamento=None):
     query = """
@@ -344,7 +399,11 @@ def get_fila_temporal(date_from=None, date_to=None, local=None, servico=None, de
         query += " AND departamento = %s"
         params.append(departamento)
     query += " ORDER BY data DESC, local_servico, departamento LIMIT 500"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_fila_temporal, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=None):
     query = """
@@ -384,7 +443,11 @@ def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=No
         query += " AND servico = %s"
         params.append(servico)
     query += " ORDER BY data DESC, local_servico, ordem_fluxo, ordem_status LIMIT 500"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_fluxo_departamentos, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_nao_compareceram_por_local(date_from=None, date_to=None):
     query = """
@@ -405,7 +468,11 @@ def get_nao_compareceram_por_local(date_from=None, date_to=None):
     else:
         query += " AND ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '12 months', 'YYYY-MM')"
     query += " GROUP BY local_servico, ano_mes ORDER BY local_servico, ano_mes LIMIT 100"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_nao_compareceram_por_local, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_nao_compareceram_detalhado(date_from=None, date_to=None, local=None, servico=None, limit=1000):
     query = """
@@ -448,10 +515,18 @@ def get_nao_compareceram_detalhado(date_from=None, date_to=None, local=None, ser
         params.append(servico)
     query += " ORDER BY data_agendamento DESC, local_servico LIMIT %s"
     params.append(limit)
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_nao_compareceram_detalhado, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_dim_local():
-    return execute_query_dataframe("SELECT * FROM vw_bi_dim_local WHERE active = true ORDER BY local_servico LIMIT 1000")
+    try:
+        return execute_query_dataframe_simple("SELECT * FROM vw_bi_dim_local WHERE active = true ORDER BY local_servico LIMIT 1000")
+    except Exception as e:
+        print(f"Error in get_dim_local, falling back to pool: {e}")
+        return execute_query_dataframe("SELECT * FROM vw_bi_dim_local WHERE active = true ORDER BY local_servico LIMIT 1000")
 
 def get_dim_date(date_from=None, date_to=None):
     query = "SELECT * FROM vw_bi_dim_date WHERE 1=1"
@@ -463,10 +538,18 @@ def get_dim_date(date_from=None, date_to=None):
         query += " AND data <= %s"
         params.append(date_to)
     query += " ORDER BY data DESC LIMIT 1000"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_dim_date, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_atendimentos_por_hora(date_from=None, date_to=None):
-    return execute_query_dataframe("SELECT * FROM vw_bi_atendimentos_por_hora ORDER BY hora")
+    try:
+        return execute_query_dataframe_simple("SELECT * FROM vw_bi_atendimentos_por_hora ORDER BY hora")
+    except Exception as e:
+        print(f"Error in get_atendimentos_por_hora, falling back to pool: {e}")
+        return execute_query_dataframe("SELECT * FROM vw_bi_atendimentos_por_hora ORDER BY hora")
 
 def get_tempo_medio(date_from=None, date_to=None):
     query = """
@@ -493,7 +576,11 @@ def get_tempo_medio(date_from=None, date_to=None):
         query += " AND data <= %s"
         params.append(date_to)
     query += " ORDER BY data DESC, local_servico LIMIT 500"
-    return execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_tempo_medio, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
 
 def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
     query = """
@@ -525,7 +612,11 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None)
         query += " AND dl.servico = %s"
         params.append(servico)
 
-    df = execute_query_dataframe(query, tuple(params) if params else None)
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_kpis_fact_resumo, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params) if params else None)
 
     if df.empty or df.iloc[0]['total_vagas'] is None:
         return {
