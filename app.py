@@ -563,7 +563,7 @@ def create_nao_table(df):
     if df.empty:
         return html.Div('Sem dados para exibir', className='empty-state')
 
-    columns_to_show = ['data_agendamento', 'local_servico', 'nome_tutor', 'cpf', 'nome_animal', 'porte', 'era_prioridade']
+    columns_to_show = ['booking_id', 'data_agendamento', 'local_servico', 'nome_tutor', 'cpf', 'nome_animal', 'porte', 'era_prioridade']
     df_display = df[[c for c in columns_to_show if c in df.columns]].head(50).copy()
 
     if 'data_agendamento' in df_display.columns:
@@ -574,6 +574,7 @@ def create_nao_table(df):
         'local_servico': 'Local',
         'nome_tutor': 'Tutor',
         'cpf': 'CPF',
+        'booking_id': 'Protocolo',
         'nome_animal': 'Animal',
         'porte': 'Porte',
         'era_prioridade': 'Prioridade'

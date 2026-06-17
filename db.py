@@ -160,7 +160,8 @@ SELECT
     ss.id AS site_service_id,
     ss.name AS local_servico,
     p.name AS nome,
-    p.cpf
+    p.cpf,
+    sk.protocol AS protocolo
 FROM sk_booking sk
 JOIN person p ON sk.client_id = p.client_id AND p.person_type_id = 1
 JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id

@@ -144,6 +144,7 @@ SELECT DISTINCT ON (sk.id)
     ss.name AS local_servico,
     svc.service_name AS servico,
     sk.id AS booking_id,
+    sk.protocol AS protocolo,
     sk.init_interval_hour AS hora_vaga,
     p.person_id AS tutor_id,
     p.name AS nome_tutor,
