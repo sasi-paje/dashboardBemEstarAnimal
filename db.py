@@ -165,7 +165,8 @@ SELECT
 FROM sk_booking sk
 JOIN person p ON sk.client_id = p.client_id AND p.person_type_id = 1
 JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
-WHERE sk.status IS NULL
+WHERE sk.status = 'scheduled'
+  AND sk.service_date < CURRENT_DATE
   AND (%s IS NULL OR ss.name = %s)
   AND (%s IS NULL OR sk.service_date >= %s)
   AND (%s IS NULL OR sk.service_date <= %s)
@@ -466,8 +467,6 @@ def get_nao_compareceram_por_local(date_from=None, date_to=None):
     if date_to:
         query += " AND data_agendamento <= %s"
         params.append(date_to)
-    else:
-        query += " AND ano_mes >= TO_CHAR(CURRENT_DATE - INTERVAL '12 months', 'YYYY-MM')"
     query += " GROUP BY local_servico, ano_mes ORDER BY local_servico, ano_mes LIMIT 100"
     try:
         return execute_query_dataframe_simple(query, tuple(params) if params else None)

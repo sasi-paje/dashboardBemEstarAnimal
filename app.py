@@ -129,8 +129,8 @@ app.layout = html.Div([
                 html.Label('Periodo', className='filter-label'),
                 dcc.DatePickerRange(
                     id='date-picker',
-                    start_date=today,
-                    end_date=today,
+                    start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+                    end_date=datetime.now().strftime('%Y-%m-%d'),
                     display_format='DD/MM/YYYY',
                     className='filter-datepicker'
                 )
@@ -234,9 +234,9 @@ def clear_filters(n_clicks):
 
 def render_geral_tab(local, servico, date_from, date_to):
     if date_from is None or date_from == '':
-        date_from = today
+        date_from = None
     if date_to is None or date_to == '':
-        date_to = today
+        date_to = None
 
     kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
     df_fact = get_fact_resumo(date_from, date_to, local, servico)

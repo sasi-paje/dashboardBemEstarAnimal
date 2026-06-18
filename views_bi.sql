@@ -64,7 +64,8 @@ FROM sk_booking sk
 JOIN person p ON sk.client_id = p.client_id AND p.person_type_id = 1
 JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
 LEFT JOIN pet pt ON sk.details->>'pet_id' = pt.id::text
-WHERE sk.status IS NULL
+WHERE sk.status = 'scheduled'
+  AND sk.service_date < CURRENT_DATE
 ORDER BY sk.id, sk.service_date DESC, sk.init_interval_hour DESC;
 
 -- ============================================

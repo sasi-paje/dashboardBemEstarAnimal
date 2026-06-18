@@ -16,9 +16,9 @@ SELECT
     COUNT(*) AS total_vagas,
     COUNT(*) FILTER (WHERE sk.status = 'scheduled') AS vagas_scheduled,
     COUNT(*) FILTER (WHERE sk.status = 'checked_in') AS vagas_checked_in,
-    COUNT(*) FILTER (WHERE sk.status IS NULL) AS vagas_nao_confirmadas,
+    COUNT(*) FILTER (WHERE sk.status = 'scheduled' AND sk.service_date < CURRENT_DATE) AS vagas_nao_confirmadas,
     COUNT(*) FILTER (WHERE sk.status IS NOT NULL) AS vagas_ocupadas,
-    COUNT(*) FILTER (WHERE sk.status IS NULL) AS vagas_livres
+    COUNT(*) FILTER (WHERE sk.status = 'scheduled' AND sk.service_date >= CURRENT_DATE) AS vagas_livres
 FROM sk_booking sk
 JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
 JOIN sk_service svc ON ss.id_service = svc.id
@@ -167,7 +167,8 @@ JOIN sk_service svc ON ss.id_service = svc.id
 JOIN person p ON sk.client_id = p.client_id
 LEFT JOIN pet ON (sk.details->>'pet_id')::text::integer = pet.id
 LEFT JOIN breed br ON pet.breed_id = br.id
-WHERE sk.status IS NULL
+WHERE sk.status = 'scheduled'
+  AND sk.service_date < CURRENT_DATE
   AND sk.service_date IS NOT NULL
 ORDER BY sk.id;
 
@@ -183,7 +184,7 @@ WITH vagas AS (
         service_date,
         COUNT(*) AS total_vagas,
         COUNT(*) FILTER (WHERE status IS NOT NULL) AS vagas_ocupadas,
-        COUNT(*) FILTER (WHERE status IS NULL) AS nao_confirmados
+        COUNT(*) FILTER (WHERE status = 'scheduled' AND service_date < CURRENT_DATE) AS nao_confirmados
     FROM sk_booking
     WHERE service_date IS NOT NULL
     GROUP BY service_date
@@ -204,7 +205,7 @@ nao_compareceram AS (
         service_date,
         COUNT(*) AS total_nao_compareceram
     FROM sk_booking
-    WHERE status IS NULL AND service_date IS NOT NULL
+    WHERE status = 'scheduled' AND service_date < CURRENT_DATE AND service_date IS NOT NULL
     GROUP BY service_date
 )
 SELECT
@@ -369,19 +370,19 @@ WITH bookings AS (
     WHERE service_date IS NOT NULL
 ),
 vagas_agg AS (
-    SELECT 
+    SELECT
         service_date,
         id_site_sevice,
         COUNT(*) AS total_vagas,
         COUNT(*) FILTER (WHERE status = 'scheduled') AS vagas_scheduled,
         COUNT(*) FILTER (WHERE status = 'checked_in') AS vagas_checked_in,
-        COUNT(*) FILTER (WHERE status IS NULL) AS vagas_nao_confirmadas,
+        COUNT(*) FILTER (WHERE status = 'scheduled' AND service_date < CURRENT_DATE) AS vagas_nao_confirmadas,
         COUNT(*) FILTER (WHERE status IS NOT NULL) AS vagas_ocupadas
     FROM bookings
     GROUP BY service_date, id_site_sevice
 ),
 fila_agg AS (
-    SELECT 
+    SELECT
         service_date,
         id_site_service,
         COUNT(*) AS em_fila,
@@ -394,12 +395,12 @@ fila_agg AS (
     GROUP BY service_date, id_site_service
 ),
 nao_comp_agg AS (
-    SELECT 
+    SELECT
         service_date,
         id_site_sevice,
         COUNT(*) AS nao_compareceram
     FROM sk_booking
-    WHERE status IS NULL AND service_date IS NOT NULL
+    WHERE status = 'scheduled' AND service_date < CURRENT_DATE AND service_date IS NOT NULL
     GROUP BY service_date, id_site_sevice
 )
 SELECT 
