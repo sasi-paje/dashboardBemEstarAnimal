@@ -478,6 +478,12 @@ tbody tr:hover {
         grid-template-columns: 1fr;
     }
 
+    .chart-box,
+    .chart-box-full {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
     .card-kpi {
         padding: 16px;
     }

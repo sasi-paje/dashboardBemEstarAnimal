@@ -270,7 +270,7 @@ def render_geral_tab(local, servico, date_from, date_to):
                     html.H3('Ocupação por Local', className='chart-title'),
                     html.Span(f'{len(df_vagas["local_servico"].unique()) if not df_vagas.empty else 0} locais', className='chart-badge')
                 ], className='chart-header'),
-                dcc.Graph(figure=fig_ocupacao, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-ocupacao', figure=fig_ocupacao, config={'displayModeBar': False})
             ], className='chart-box'),
 
             html.Div([
@@ -278,26 +278,26 @@ def render_geral_tab(local, servico, date_from, date_to):
                     html.H3('Status da Fila', className='chart-title'),
                     html.Span(f'Total: {df_fila["quantidade"].sum() if not df_fila.empty else 0}', className='chart-badge')
                 ], className='chart-header'),
-                dcc.Graph(figure=fig_fila_status, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-fila-status', figure=fig_fila_status, config={'displayModeBar': False})
             ], className='chart-box'),
         ], className='charts-row'),
 
         html.Div([
             html.Div([
                 html.H3('Evolução Temporal', className='chart-title'),
-                dcc.Graph(figure=fig_temporal, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-temporal', figure=fig_temporal, config={'displayModeBar': False})
             ], className='chart-box-full'),
         ], className='charts-row'),
 
         html.Div([
             html.Div([
                 html.H3('Atendimentos por Hora', className='chart-title'),
-                dcc.Graph(figure=fig_hora, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-hora', figure=fig_hora, config={'displayModeBar': False})
             ], className='chart-box'),
 
             html.Div([
                 html.H3('Não-Comparecimentos por Local', className='chart-title'),
-                dcc.Graph(figure=fig_nao_por_local, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-nao-local', figure=fig_nao_por_local, config={'displayModeBar': False})
             ], className='chart-box'),
         ], className='charts-row'),
 
@@ -322,12 +322,12 @@ def render_departamentos_tab(local, servico, departamento, date_from, date_to):
         html.Div([
             html.Div([
                 html.H3('Fila por Departamento', className='chart-title'),
-                dcc.Graph(figure=fig_fila_dept, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-fila-dept', figure=fig_fila_dept, config={'displayModeBar': False})
             ], className='chart-box'),
 
             html.Div([
                 html.H3('Status por Departamento', className='chart-title'),
-                dcc.Graph(figure=fig_status_dept, config={'displayModeBar': False})
+                dcc.Graph(id='grafico-status-dept', figure=fig_status_dept, config={'displayModeBar': False})
             ], className='chart-box'),
         ], className='charts-row'),
 
