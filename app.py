@@ -10,6 +10,7 @@ from db import (
     get_kpis_fact_resumo,
     get_fact_resumo,
     get_vagas_temporal,
+    get_campanhas_encerradas,
     get_fila_temporal,
     get_fluxo_departamentos,
     get_departamentos_flow,
@@ -345,18 +346,18 @@ def render_departamentos_tab(local, servico, departamento, date_from, date_to):
 
 # ─── Tab: Campanhas ─────────────────────────────────────────────────────────
 def render_campanhas_tab(local, servico, date_from, date_to):
-    """Aba de Campanhas - usando dados de vagas por local/serviço como proxy"""
+    """Aba de Campanhas - dados de vagas por local e campanhas encerradas"""
     if date_from is None or date_from == '':
         date_from = None
     if date_to is None or date_to == '':
         date_to = None
 
     df_vagas = get_vagas_temporal(date_from, date_to, local, servico)
+    df_campanhas = get_campanhas_encerradas()
     kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
 
     fig_vagas_local = create_vagas_por_local_chart(df_vagas)
-    fig_especie = create_especie_chart()  # Placeholder
-    fig_genero = create_genero_chart()    # Placeholder
+    fig_campanhas = create_campanhas_encerradas_chart(df_campanhas)
 
     return html.Div([
         html.Div([
@@ -373,17 +374,10 @@ def render_campanhas_tab(local, servico, date_from, date_to):
             ], className='chart-card'),
 
             html.Div([
-                html.H3('Espécie', className='chart-title'),
-                dcc.Graph(id='grafico-especie', figure=fig_especie, config={'displayModeBar': False})
+                html.H3('Campanhas Encerradas', className='chart-title'),
+                dcc.Graph(id='grafico-campanhas-encerradas', figure=fig_campanhas, config={'displayModeBar': False})
             ], className='chart-card'),
         ], className='chart-row chart-row--half'),
-
-        html.Div([
-            html.Div([
-                html.H3('Gênero', className='chart-title'),
-                dcc.Graph(id='grafico-genero', figure=fig_genero, config={'displayModeBar': False})
-            ], className='chart-card'),
-        ], className='chart-row'),
     ])
 
 
@@ -451,34 +445,36 @@ def create_ocupacao_chart(df):
     if df is None or df.empty:
         return create_empty_figure()
 
-    df_agg = df.groupby(['local_servico', 'servico']).agg({
+    df_agg = df.groupby('local_servico').agg({
         'total_vagas': 'sum',
-        'vagas_ocupadas': 'sum',
-        'vagas_nao_confirmadas': 'sum'
+        'vagas_ocupadas': 'sum'
     }).reset_index()
+    df_agg['vagas_livres'] = df_agg['total_vagas'] - df_agg['vagas_ocupadas']
 
-    df_melt = df_agg.melt(
-        id_vars=['local_servico', 'servico'],
-        value_vars=['vagas_ocupadas', 'vagas_nao_confirmadas'],
-        var_name='tipo',
-        value_name='quantidade'
-    )
+    fig = go.Figure()
 
-    fig = px.bar(
-        df_melt,
-        x='local_servico',
-        y='quantidade',
-        color='tipo',
-        title='',
-        labels={'local_servico': '', 'quantidade': 'Vagas', 'tipo': ''},
-        color_discrete_map={
-            'vagas_ocupadas': '#3B82F6',
-            'vagas_nao_confirmadas': '#E5E7EB'
-        },
-        barmode='stack'
-    )
+    fig.add_trace(go.Bar(
+        x=df_agg['vagas_ocupadas'],
+        y=df_agg['local_servico'],
+        name='Ocupadas',
+        orientation='h',
+        marker_color='#3B82F6',
+        text=df_agg['vagas_ocupadas'],
+        textposition='outside'
+    ))
+
+    fig.add_trace(go.Bar(
+        x=df_agg['vagas_livres'],
+        y=df_agg['local_servico'],
+        name='Livres',
+        orientation='h',
+        marker_color='#10B981',
+        text=df_agg['vagas_livres'],
+        textposition='outside'
+    ))
 
     fig.update_layout(
+        barmode='group',
         paper_bgcolor='white',
         plot_bgcolor='white',
         font=dict(color='#374151', family='DM Sans, sans-serif'),
@@ -486,11 +482,9 @@ def create_ocupacao_chart(df):
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
-        xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False)
+        xaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False),
+        yaxis=dict(showgrid=False)
     )
-    fig.update_xaxes(tickangle=45, gridcolor='#f3f4f6', ticks='outside')
-    fig.update_yaxes(gridcolor='#f3f4f6', ticks='outside')
 
     return fig
 
@@ -764,32 +758,34 @@ def create_vagas_por_local_chart(df):
 
     df_agg = df.groupby('local_servico').agg({
         'total_vagas': 'sum',
-        'vagas_ocupadas': 'sum',
-        'vagas_livres': 'sum'
+        'vagas_ocupadas': 'sum'
     }).reset_index()
+    df_agg['vagas_livres'] = df_agg['total_vagas'] - df_agg['vagas_ocupadas']
 
-    df_melt = df_agg.melt(
-        id_vars='local_servico',
-        value_vars=['vagas_ocupadas', 'vagas_livres'],
-        var_name='tipo',
-        value_name='quantidade'
-    )
+    fig = go.Figure()
 
-    fig = px.bar(
-        df_melt,
-        x='local_servico',
-        y='quantidade',
-        color='tipo',
-        title='',
-        labels={'local_servico': '', 'quantidade': 'Vagas', 'tipo': ''},
-        barmode='stack',
-        color_discrete_map={
-            'vagas_ocupadas': '#3B82F6',
-            'vagas_livres': '#10B981'
-        }
-    )
+    fig.add_trace(go.Bar(
+        x=df_agg['vagas_ocupadas'],
+        y=df_agg['local_servico'],
+        name='Ocupadas',
+        orientation='h',
+        marker_color='#3B82F6',
+        text=df_agg['vagas_ocupadas'],
+        textposition='outside'
+    ))
+
+    fig.add_trace(go.Bar(
+        x=df_agg['vagas_livres'],
+        y=df_agg['local_servico'],
+        name='Livres',
+        orientation='h',
+        marker_color='#10B981',
+        text=df_agg['vagas_livres'],
+        textposition='outside'
+    ))
 
     fig.update_layout(
+        barmode='group',
         paper_bgcolor='white',
         plot_bgcolor='white',
         font=dict(color='#374151', family='DM Sans, sans-serif'),
@@ -797,10 +793,51 @@ def create_vagas_por_local_chart(df):
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
-        xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
+        xaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False),
+        yaxis=dict(showgrid=False)
+    )
+
+    return fig
+
+
+def create_campanhas_encerradas_chart(df):
+    """Gráfico de campanhas encerradas com vagas oferecidas e atendidas"""
+    if df is None or df.empty:
+        return create_empty_figure()
+
+    fig = go.Figure()
+
+    # Barras agrupadas: vagas oferecidas e atendidas por campanha
+    fig.add_trace(go.Bar(
+        x=df['campanha'],
+        y=df['total_vagas'],
+        name='Vagas Oferecidas',
+        marker_color='#3B82F6',
+        text=df['total_vagas'],
+        textposition='outside'
+    ))
+
+    fig.add_trace(go.Bar(
+        x=df['campanha'],
+        y=df['total_atendidas'],
+        name='Atendidas',
+        marker_color='#10B981',
+        text=df['total_atendidas'],
+        textposition='outside'
+    ))
+
+    fig.update_layout(
+        barmode='group',
+        paper_bgcolor='white',
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=80),
+        height=280,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+        xaxis=dict(showgrid=False, tickangle=45),
         yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False)
     )
-    fig.update_xaxes(tickangle=45, gridcolor='#f3f4f6', ticks='outside')
+    fig.update_xaxes(tickangle=45, ticks='outside')
     fig.update_yaxes(gridcolor='#f3f4f6', ticks='outside')
 
     return fig

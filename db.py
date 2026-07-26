@@ -461,7 +461,7 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None)
         print(f"Error in get_kpis_fact_resumo, falling back to pool: {e}")
         df = execute_query_dataframe(query, tuple(params) if params else None)
 
-    if df.empty or df.iloc[0]['total_vagas'] is None:
+    if df.empty or df.iloc[0]['total_vagas'] is None or df.iloc[0]['taxa_ocupacao'] is None:
         return {
             'total_vagas': 0,
             'vagas_ocupadas': 0,
@@ -564,6 +564,28 @@ def get_vagas_temporal(date_from=None, date_to=None, local=None, servico=None):
     except Exception as e:
         print(f"Error in get_vagas_temporal, falling back to pool: {e}")
         return execute_query_dataframe(query, tuple(params) if params else None)
+
+def get_campanhas_encerradas():
+    """Retorna campanhas encerradas com total de vagas e atendimentos"""
+    query = """
+    SELECT
+        c.id,
+        c.name AS campanha,
+        c.end_date AS data_encerramento,
+        COUNT(b.id) AS total_vagas,
+        COUNT(b.status) AS vagas_com_status,
+        COUNT(b.pet_id) AS total_atendidas
+    FROM sk_campaign c
+    LEFT JOIN sk_booking b ON b.id_campaign = c.id
+    WHERE c.active = false
+    GROUP BY c.id, c.name, c.end_date
+    ORDER BY c.end_date DESC
+    """
+    try:
+        return execute_query_dataframe_simple(query, None)
+    except Exception as e:
+        print(f"Error in get_campanhas_encerradas, falling back to pool: {e}")
+        return execute_query_dataframe(query, None)
 
 def get_fila_temporal(date_from=None, date_to=None, local=None, servico=None, departamento=None):
     query = """
