@@ -134,8 +134,6 @@ app.layout = html.Div([
     dcc.Store(id='last-update', data=None),
     dcc.Store(id='filter-options', data=None),
 
-    HEADER,
-
     html.Div([
         FILTER_PANEL,
 
