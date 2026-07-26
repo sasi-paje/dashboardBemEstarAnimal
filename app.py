@@ -1,6 +1,7 @@
 import dash
 from dash import dcc, html, callback, Input, Output, State
-from datetime import datetime, timedelta
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -109,8 +110,8 @@ FILTER_PANEL = html.Div([
             html.Label('Período', className='filter-label'),
             dcc.DatePickerRange(
                 id='date-picker',
-                start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
-                end_date=datetime.now().strftime('%Y-%m-%d'),
+                start_date=datetime.now().replace(day=1).strftime('%Y-%m-%d'),
+                end_date=((datetime.now().replace(day=1) + relativedelta(months=1)) - relativedelta(days=1)).strftime('%Y-%m-%d'),
                 display_format='DD/MM/YYYY',
                 className='filter-datepicker'
             )

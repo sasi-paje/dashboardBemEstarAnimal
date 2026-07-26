@@ -141,39 +141,39 @@ body {
 .filter-panel {
   background: var(--bg-card);
   border-radius: var(--radius-lg);
-  padding: var(--space-lg) var(--space-xl);
+  padding: var(--space-lg);
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border-color);
   margin-bottom: var(--space-xl);
-  display: flex !important;
-  flex-direction: column !important;
-  gap: var(--space-md);
-  overflow-x: auto;
+  display: block !important;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-row {
-  display: flex;
-  flex-direction: row;
-  gap: var(--space-lg);
-  flex-wrap: wrap;
-}
-
-.filter-row:first-child {
-  justify-content: flex-start;
+  display: block;
+  width: 100%;
+  margin-bottom: var(--space-md);
 }
 
 .filter-row:last-child {
-  justify-content: flex-start;
+  margin-bottom: 0;
+}
+
+.filter-row::after {
+  content: '';
+  display: table;
+  clear: both;
 }
 
 .filter-group {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: var(--space-xs);
-  flex: 1 1 auto !important;
-  min-width: 180px !important;
-  max-width: 240px !important;
-  width: auto !important;
+  display: inline-block !important;
+  float: left !important;
+  margin-right: var(--space-lg);
+  margin-bottom: var(--space-sm);
+  min-width: 200px !important;
+  max-width: 280px !important;
+  vertical-align: top;
 }
 
 .filter-label {
@@ -183,6 +183,15 @@ body {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.btn-clear,
+.btn-refresh {
+  margin-top: 22px;
+  height: 36px;
+  padding: 0 var(--space-md);
 }
 
 /* Override Dash Dropdown */
