@@ -1,6 +1,5 @@
 import dash
 from dash import dcc, html, callback, Input, Output, State
-import dash_bootstrap_components as dbc
 from datetime import datetime, timedelta
 import pandas as pd
 import plotly.express as px
@@ -21,10 +20,7 @@ from db import (
 
 app = dash.Dash(
     __name__,
-    external_stylesheets=[
-        dbc.themes.BOOTSTRAP,
-        '/assets/style.css'
-    ],
+    external_stylesheets=['/assets/style.css'],
     suppress_callback_exceptions=True
 )
 
@@ -37,16 +33,6 @@ def format_number(num):
     if isinstance(num, float):
         return f'{num:,.1f}'.replace(',', '.')
     return f'{int(num):,}'.replace(',', '.')
-
-
-def kpi_card(value, label, color_class='', icon=''):
-    return html.Div([
-        html.Div([
-            html.Span(className=f'kpi-icon {icon}', children=icon if icon else ''),
-            html.Div(value, className=f'kpi-value {color_class}'),
-        ], className='kpi-header'),
-        html.Div(label, className='kpi-label')
-    ], className='card-kpi')
 
 
 def create_empty_figure():
@@ -63,107 +49,106 @@ def create_empty_figure():
     return fig
 
 
+# ─── Header ────────────────────────────────────────────────────────────────
 HEADER = html.Div([
     html.Div([
+        html.Div('🐾', className='dash-header__logo'),
         html.Div([
-            html.Span(className='logo-icon', children='🐾'),
-            html.Div([
-                html.H1('Bem-Estar Animal', className='title'),
-                html.Span('Dashboard de Atendimento Veterinário', className='subtitle')
-            ], className='title-group')
-        ], className='header-left'),
-        html.Div([
-            html.Span(id='current-datetime', className='datetime'),
-            html.Div(id='refresh-indicator', className='refresh-indicator', children=[
-                html.Span(className='dot'),
-                html.Span(id='last-update-text', children='Atualizado agora')
-            ])
-        ], className='header-right')
-    ], className='header-content')
-], className='app-header')
+            html.H1('Bem-Estar Animal', className='dash-header__title'),
+        ], className='dash-header__info'),
+        html.Span(
+            f'Última atualização: {datetime.now().strftime("%d/%m/%Y %H:%M")}',
+            className='dash-header__subtitle'
+        ),
+    ], className='dash-header')
+], className='dash-header-wrapper')
 
 
+# ─── Filtros ───────────────────────────────────────────────────────────────
+FILTER_PANEL = html.Div([
+    html.Div([
+        html.Div([
+            html.Label('Local', className='filter-label'),
+            dcc.Dropdown(
+                id='filtro-local',
+                options=[],
+                value=None,
+                placeholder='Selecione',
+                clearable=True,
+                className='filter-dropdown'
+            )
+        ], className='filter-group'),
+
+        html.Div([
+            html.Label('Serviço', className='filter-label'),
+            dcc.Dropdown(
+                id='filtro-servico',
+                options=[],
+                value=None,
+                placeholder='Selecione',
+                clearable=True,
+                className='filter-dropdown'
+            )
+        ], className='filter-group'),
+
+        html.Div([
+            html.Label('Departamento', className='filter-label'),
+            dcc.Dropdown(
+                id='filtro-departamento',
+                options=[],
+                value=None,
+                placeholder='Selecione',
+                clearable=True,
+                className='filter-dropdown'
+            )
+        ], className='filter-group'),
+    ], className='filter-row'),
+
+    html.Div([
+        html.Div([
+            html.Label('Período', className='filter-label'),
+            dcc.DatePickerRange(
+                id='date-picker',
+                start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+                end_date=datetime.now().strftime('%Y-%m-%d'),
+                display_format='DD/MM/YYYY',
+                className='filter-datepicker'
+            )
+        ], className='filter-group'),
+
+        html.Div([
+            html.Label('', className='filter-label'),
+            html.Button('Limpar Filtros', id='btn-clear', className='btn-clear')
+        ], className='filter-group'),
+
+        html.Div([
+            html.Label('', className='filter-label'),
+            html.Button('↻ Atualizar', id='btn-refresh', className='btn-refresh')
+        ], className='filter-group'),
+    ], className='filter-row'),
+], className='filter-panel')
+
+
+# ─── Layout Principal ───────────────────────────────────────────────────────
 app.layout = html.Div([
     dcc.Store(id='last-update', data=None),
     dcc.Store(id='filter-options', data=None),
 
+    HEADER,
+
     html.Div([
-        html.Div([
-            html.Div([
-                html.Label('Local', className='filter-label'),
-                dcc.Dropdown(
-                    id='filtro-local',
-                    options=[],
-                    value=None,
-                    placeholder='Selecione',
-                    clearable=True,
-                    className='filter-dropdown'
-                )
-            ], className='filter-group'),
+        FILTER_PANEL,
 
-            html.Div([
-                html.Label('Servico', className='filter-label'),
-                dcc.Dropdown(
-                    id='filtro-servico',
-                    options=[],
-                    value=None,
-                    placeholder='Selecione',
-                    clearable=True,
-                    className='filter-dropdown'
-                )
-            ], className='filter-group'),
+        dcc.Tabs(id='tabs', value='tab-geral', className='tabs-wrapper', children=[
+            dcc.Tab(label='📊 Visão Geral', value='tab-geral', className='tab-item', selected_className='tab-item-selected'),
+            dcc.Tab(label='🏢 Departamentos', value='tab-departamentos', className='tab-item', selected_className='tab-item-selected'),
+            dcc.Tab(label='📋 Campanhas', value='tab-campanhas', className='tab-item', selected_className='tab-item-selected'),
+            dcc.Tab(label='🎯 Castrações', value='tab-castracoes', className='tab-item', selected_className='tab-item-selected'),
+            dcc.Tab(label='📥 Solicitações', value='tab-solicitacoes', className='tab-item', selected_className='tab-item-selected'),
+        ]),
 
-            html.Div([
-                html.Label('Departamento', className='filter-label'),
-                dcc.Dropdown(
-                    id='filtro-departamento',
-                    options=[],
-                    value=None,
-                    placeholder='Selecione',
-                    clearable=True,
-                    className='filter-dropdown'
-                )
-            ], className='filter-group'),
-
-            html.Div([
-                html.Label('Periodo', className='filter-label'),
-                dcc.DatePickerRange(
-                    id='date-picker',
-                    start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
-                    end_date=datetime.now().strftime('%Y-%m-%d'),
-                    display_format='DD/MM/YYYY',
-                    className='filter-datepicker'
-                )
-            ], className='filter-group'),
-
-            html.Div([
-                html.Label('', className='filter-label'),
-                dbc.Button(
-                    'Limpar Filtros',
-                    id='btn-clear',
-                    color='secondary',
-                    className='btn-clear'
-                )
-            ], className='filter-group'),
-
-            html.Div([
-                html.Label('', className='filter-label'),
-                dbc.Button(
-                    [html.Span('↻'), ' Atualizar'],
-                    id='btn-refresh',
-                    color='primary',
-                    className='btn-refresh'
-                )
-            ], className='filter-group'),
-        ], className='filters-bar')
-    ], className='filters-container'),
-
-    dcc.Tabs(id='tabs', value='tab-geral', className='tabs-wrapper', children=[
-        dcc.Tab(label='📊 Visão Geral', value='tab-geral', className='tab-item', selected_className='tab-item-selected'),
-        dcc.Tab(label='🏢 Departamentos', value='tab-departamentos', className='tab-item', selected_className='tab-item-selected'),
-    ]),
-
-    html.Div(id='tab-content', className='content-area'),
+        html.Div(id='tab-content', className='content-area'),
+    ], className='dash-main'),
 
     dcc.Interval(
         id='interval-component',
@@ -173,6 +158,7 @@ app.layout = html.Div([
 ], className='app-container')
 
 
+# ─── Callbacks de Filtros ───────────────────────────────────────────────────
 @app.callback(
     [Output('filtro-local', 'options'),
      Output('filtro-servico', 'options'),
@@ -214,8 +200,15 @@ def render_tab_content(selected_tab, n_clicks_refresh, n_clicks_clear, n_interva
 
     if selected_tab == 'tab-geral':
         return render_geral_tab(local, servico, date_from, date_to)
-    else:
+    elif selected_tab == 'tab-departamentos':
         return render_departamentos_tab(local, servico, departamento, date_from, date_to)
+    elif selected_tab == 'tab-campanhas':
+        return render_campanhas_tab(local, servico, date_from, date_to)
+    elif selected_tab == 'tab-castracoes':
+        return render_castracoes_tab(local, servico, date_from, date_to)
+    elif selected_tab == 'tab-solicitacoes':
+        return render_solicitacoes_tab(local, servico, date_from, date_to)
+    return html.Div('Tab não encontrada')
 
 
 @callback(
@@ -232,6 +225,16 @@ def clear_filters(n_clicks):
     return dash.no_update
 
 
+# ─── KPI Card Helper ────────────────────────────────────────────────────────
+def kpi_card(value, label, variant='blue', icon=''):
+    return html.Div([
+        html.Div(icon, className=f'kpi-card__icon') if icon else html.Div(''),
+        html.Div(label, className='kpi-card__label'),
+        html.Div(value, className='kpi-card__value'),
+    ], className=f'kpi-card kpi-card--{variant}')
+
+
+# ─── Tab: Visão Geral ───────────────────────────────────────────────────────
 def render_geral_tab(local, servico, date_from, date_to):
     if date_from is None or date_from == '':
         date_from = None
@@ -256,60 +259,55 @@ def render_geral_tab(local, servico, date_from, date_to):
 
     return html.Div([
         html.Div([
-            kpi_card(format_number(kpis['total_vagas']), 'Total Vagas', '', '📋'),
+            kpi_card(format_number(kpis['total_vagas']), 'Total Vagas', 'navy', '📋'),
             kpi_card(format_number(kpis['vagas_ocupadas']), 'Ocupadas', 'blue', '✓'),
-            kpi_card(format_number(kpis['vagas_livres']), 'Livres', 'green', '○'),
-            kpi_card(f"{kpis['taxa_ocupacao']}%", 'Taxa Ocup.', 'yellow', '📈'),
-            kpi_card(format_number(kpis['em_fila']), 'Em Fila', 'purple', '👥'),
-            kpi_card(format_number(kpis['nao_compareceram']), 'Não Comp.', 'red', '✕'),
+            kpi_card(format_number(kpis['vagas_livres']), 'Livres', 'teal', '○'),
+            kpi_card(f"{kpis['taxa_ocupacao']}%", 'Taxa Ocup.', 'dark', '📈'),
+            kpi_card(format_number(kpis['em_fila']), 'Em Fila', 'navy', '👥'),
+            kpi_card(format_number(kpis['nao_compareceram']), 'Não Comp.', 'dark', '✕'),
         ], className='kpi-grid'),
 
         html.Div([
             html.Div([
-                html.Div([
-                    html.H3('Ocupação por Local', className='chart-title'),
-                    html.Span(f'{len(df_vagas["local_servico"].unique()) if not df_vagas.empty else 0} locais', className='chart-badge')
-                ], className='chart-header'),
+                html.H3('Ocupação por Local', className='chart-title'),
                 dcc.Graph(id='grafico-ocupacao', figure=fig_ocupacao, config={'displayModeBar': False})
-            ], className='chart-box'),
+            ], className='chart-card'),
 
             html.Div([
-                html.Div([
-                    html.H3('Status da Fila', className='chart-title'),
-                    html.Span(f'Total: {df_fila["quantidade"].sum() if not df_fila.empty else 0}', className='chart-badge')
-                ], className='chart-header'),
+                html.H3('Status da Fila', className='chart-title'),
                 dcc.Graph(id='grafico-fila-status', figure=fig_fila_status, config={'displayModeBar': False})
-            ], className='chart-box'),
-        ], className='charts-row'),
+            ], className='chart-card'),
+        ], className='chart-row chart-row--half'),
 
         html.Div([
             html.Div([
                 html.H3('Evolução Temporal', className='chart-title'),
                 dcc.Graph(id='grafico-temporal', figure=fig_temporal, config={'displayModeBar': False})
-            ], className='chart-box-full'),
-        ], className='charts-row'),
+            ], className='chart-card'),
+        ], className='chart-row'),
 
         html.Div([
             html.Div([
                 html.H3('Atendimentos por Hora', className='chart-title'),
                 dcc.Graph(id='grafico-hora', figure=fig_hora, config={'displayModeBar': False})
-            ], className='chart-box'),
+            ], className='chart-card'),
 
             html.Div([
                 html.H3('Não-Comparecimentos por Local', className='chart-title'),
                 dcc.Graph(id='grafico-nao-local', figure=fig_nao_por_local, config={'displayModeBar': False})
-            ], className='chart-box'),
-        ], className='charts-row'),
+            ], className='chart-card'),
+        ], className='chart-row chart-row--half'),
 
         html.Div([
             html.Div([
                 html.H3('Detalhes Não-Comparecimentos', className='chart-title'),
                 tabela_nao
-            ], className='table-box'),
-        ], className='tables-row'),
+            ], className='table-card'),
+        ], className='chart-row'),
     ])
 
 
+# ─── Tab: Departamentos ─────────────────────────────────────────────────────
 def render_departamentos_tab(local, servico, departamento, date_from, date_to):
     df_fluxo = get_fluxo_departamentos(date_from, date_to, local, servico)
     df_fila = get_fila_temporal(date_from, date_to, local, servico, departamento)
@@ -320,28 +318,138 @@ def render_departamentos_tab(local, servico, departamento, date_from, date_to):
 
     return html.Div([
         html.Div([
+            kpi_card('6', 'Total Dept.', 'navy', '🏢'),
+            kpi_card('4', 'Ativos', 'teal', '✓'),
+            kpi_card('2', 'Inativos', 'dark', '○'),
+        ], className='kpi-grid'),
+
+        html.Div([
             html.Div([
                 html.H3('Fila por Departamento', className='chart-title'),
                 dcc.Graph(id='grafico-fila-dept', figure=fig_fila_dept, config={'displayModeBar': False})
-            ], className='chart-box'),
+            ], className='chart-card'),
 
             html.Div([
                 html.H3('Status por Departamento', className='chart-title'),
                 dcc.Graph(id='grafico-status-dept', figure=fig_status_dept, config={'displayModeBar': False})
-            ], className='chart-box'),
-        ], className='charts-row'),
+            ], className='chart-card'),
+        ], className='chart-row chart-row--half'),
 
         html.Div([
             html.Div([
                 html.H3('Detalhamento do Fluxo', className='chart-title'),
                 tabela_fluxo
-            ], className='table-box'),
-        ], className='tables-row'),
+            ], className='table-card'),
+        ], className='chart-row'),
     ])
 
 
+# ─── Tab: Campanhas ─────────────────────────────────────────────────────────
+def render_campanhas_tab(local, servico, date_from, date_to):
+    """Aba de Campanhas - usando dados de vagas por local/serviço como proxy"""
+    if date_from is None or date_from == '':
+        date_from = None
+    if date_to is None or date_to == '':
+        date_to = None
+
+    df_vagas = get_vagas_temporal(date_from, date_to, local, servico)
+    kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
+
+    fig_vagas_local = create_vagas_por_local_chart(df_vagas)
+    fig_especie = create_especie_chart()  # Placeholder
+    fig_genero = create_genero_chart()    # Placeholder
+
+    return html.Div([
+        html.Div([
+            kpi_card(format_number(kpis['total_vagas']), 'Total Vagas', 'navy', '📋'),
+            kpi_card(format_number(kpis['vagas_ocupadas']), 'Ocupadas', 'blue', '✓'),
+            kpi_card(format_number(kpis['vagas_livres']), 'Disponíveis', 'teal', '○'),
+            kpi_card(f"{kpis['taxa_ocupacao']}%", 'Ocupação', 'dark', '📈'),
+        ], className='kpi-grid'),
+
+        html.Div([
+            html.Div([
+                html.H3('Vagas por Local', className='chart-title'),
+                dcc.Graph(id='grafico-vagas-local', figure=fig_vagas_local, config={'displayModeBar': False})
+            ], className='chart-card'),
+
+            html.Div([
+                html.H3('Espécie', className='chart-title'),
+                dcc.Graph(id='grafico-especie', figure=fig_especie, config={'displayModeBar': False})
+            ], className='chart-card'),
+        ], className='chart-row chart-row--half'),
+
+        html.Div([
+            html.Div([
+                html.H3('Gênero', className='chart-title'),
+                dcc.Graph(id='grafico-genero', figure=fig_genero, config={'displayModeBar': False})
+            ], className='chart-card'),
+        ], className='chart-row'),
+    ])
+
+
+# ─── Tab: Castrações (Guinness Book) ───────────────────────────────────────
+def render_castracoes_tab(local, servico, date_from, date_to):
+    """Aba de Castrações - Gauge de progresso"""
+    if date_from is None or date_from == '':
+        date_from = None
+    if date_to is None or date_to == '':
+        date_to = None
+
+    kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
+    total_castrados = kpis.get('vagas_ocupadas', 0) or 0
+    meta = 2000
+
+    fig_gauge = create_gauge_castracoes(total_castrados, meta)
+
+    return html.Div([
+        html.Div([
+            kpi_card(format_number(total_castrados), 'Total Castrados', 'navy', '🔪'),
+            kpi_card(format_number(meta), 'Meta', 'teal', '🎯'),
+            kpi_card(f"{(total_castrados/meta*100):.1f}%", 'Progresso', 'blue', '📊'),
+        ], className='kpi-grid'),
+
+        html.Div([
+            html.Div([
+                html.H3('Progresso Castrações', className='chart-title'),
+                dcc.Graph(id='grafico-gauge', figure=fig_gauge, config={'displayModeBar': False})
+            ], className='chart-card'),
+        ], className='chart-row'),
+    ])
+
+
+# ─── Tab: Solicitações ──────────────────────────────────────────────────────
+def render_solicitacoes_tab(local, servico, date_from, date_to):
+    """Aba de Solicitações - Status das solicitações"""
+    if date_from is None or date_from == '':
+        date_from = None
+    if date_to is None or date_to == '':
+        date_to = None
+
+    df_fila = get_fila_temporal(date_from, date_to, local, servico)
+    kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
+
+    fig_status = create_status_solicitacoes_chart(df_fila)
+
+    return html.Div([
+        html.Div([
+            kpi_card(format_number(kpis.get('em_fila', 0)), 'Total Solicitações', 'navy', '📝'),
+            kpi_card(format_number(kpis.get('vagas_ocupadas', 0)), 'Atendidas', 'teal', '✓'),
+            kpi_card(format_number(kpis.get('nao_compareceram', 0)), 'Canceladas', 'dark', '✕'),
+        ], className='kpi-grid'),
+
+        html.Div([
+            html.Div([
+                html.H3('Status das Solicitações', className='chart-title'),
+                dcc.Graph(id='grafico-status-solicitacoes', figure=fig_status, config={'displayModeBar': False})
+            ], className='chart-card'),
+        ], className='chart-row'),
+    ])
+
+
+# ─── Funções de Gráficos ───────────────────────────────────────────────────
 def create_ocupacao_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     df_agg = df.groupby(['local_servico', 'servico']).agg({
@@ -374,8 +482,8 @@ def create_ocupacao_chart(df):
     fig.update_layout(
         paper_bgcolor='white',
         plot_bgcolor='white',
-        font=dict(color='#374151', size=12),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
@@ -389,7 +497,7 @@ def create_ocupacao_chart(df):
 
 
 def create_fila_pie_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     df_agg = df.groupby(['status_fila']).agg({'quantidade': 'sum'}).reset_index()
@@ -412,8 +520,8 @@ def create_fila_pie_chart(df):
 
     fig.update_layout(
         paper_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
@@ -424,7 +532,7 @@ def create_fila_pie_chart(df):
 
 
 def create_temporal_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     df_grouped = df.groupby(['data']).agg({
@@ -469,8 +577,8 @@ def create_temporal_chart(df):
     fig.update_layout(
         paper_bgcolor='white',
         plot_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
@@ -482,7 +590,7 @@ def create_temporal_chart(df):
 
 
 def create_hora_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     total = int(df['total_chamados'].sum())
@@ -508,8 +616,8 @@ def create_hora_chart(df):
 
     fig.update_layout(
         paper_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280
     )
 
@@ -517,7 +625,7 @@ def create_hora_chart(df):
 
 
 def create_nao_por_local_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     mes_map = {
@@ -545,8 +653,8 @@ def create_nao_por_local_chart(df):
     fig.update_layout(
         paper_bgcolor='white',
         plot_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=260,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
@@ -559,62 +667,8 @@ def create_nao_por_local_chart(df):
     return fig
 
 
-def create_nao_table(df):
-    if df.empty:
-        return html.Div('Sem dados para exibir', className='empty-state')
-
-    columns_to_show = ['booking_id', 'data_agendamento', 'local_servico', 'nome_tutor', 'cpf', 'nome_animal', 'porte', 'era_prioridade']
-    df_display = df[[c for c in columns_to_show if c in df.columns]].head(50).copy()
-
-    if 'data_agendamento' in df_display.columns:
-        df_display['data_agendamento'] = pd.to_datetime(df_display['data_agendamento']).dt.strftime('%d/%m/%Y')
-
-    columns_renamed = {
-        'data_agendamento': 'Data',
-        'local_servico': 'Local',
-        'nome_tutor': 'Tutor',
-        'cpf': 'CPF',
-        'booking_id': 'Protocolo',
-        'nome_animal': 'Animal',
-        'porte': 'Porte',
-        'era_prioridade': 'Prioridade'
-    }
-    df_display = df_display.rename(columns=columns_renamed)
-
-    from dash import dash_table
-    return dash_table.DataTable(
-        data=df_display.to_dict('records'),
-        columns=[{'name': i, 'id': i} for i in df_display.columns],
-        page_size=10,
-        style_table={'overflowX': 'auto'},
-        style_header={
-            'backgroundColor': '#1a1a2e',
-            'fontWeight': '600',
-            'color': 'white',
-            'borderBottom': '2px solid #3B82F6',
-            'textAlign': 'center',
-            'padding': '12px'
-        },
-        style_cell={
-            'padding': '12px',
-            'fontFamily': '"Inter", sans-serif',
-            'fontSize': '13px',
-            'color': '#374151',
-            'borderBottom': '1px solid #e5e7eb',
-            'textAlign': 'left'
-        },
-        style_data={'backgroundColor': 'white'},
-        style_data_conditional=[
-            {'if': {'row_index': 'odd'}, 'backgroundColor': '#f9fafb'},
-            {'if': {'column_id': 'Prioridade', 'filter_query': '{Prioridade} = "Sim"'}, 'color': '#EF4444', 'fontWeight': '600'}
-        ],
-        style_as_list_view=True,
-        sort_action='native',
-    )
-
-
 def create_fila_por_departamento_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     df_agg = df.groupby(['departamento', 'status_fila']).agg({'quantidade': 'sum'}).reset_index()
@@ -646,8 +700,8 @@ def create_fila_por_departamento_chart(df):
     fig.update_layout(
         paper_bgcolor='white',
         plot_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
@@ -659,7 +713,7 @@ def create_fila_por_departamento_chart(df):
 
 
 def create_status_por_departamento_chart(df):
-    if df.empty:
+    if df is None or df.empty:
         return create_empty_figure()
 
     status_col = 'status_fila' if 'status_fila' in df.columns else 'status'
@@ -694,8 +748,8 @@ def create_status_por_departamento_chart(df):
 
     fig.update_layout(
         paper_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280,
         showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
@@ -704,39 +758,236 @@ def create_status_por_departamento_chart(df):
     return fig
 
 
-def create_fluxo_chart(df):
-    if df.empty:
+def create_vagas_por_local_chart(df):
+    """Gráfico de vagas por local para aba Campanhas"""
+    if df is None or df.empty:
         return create_empty_figure()
 
-    df_agg = df.groupby(['departamento', 'ordem_fluxo']).agg({'quantidade': 'sum'}).reset_index()
-    df_agg = df_agg.sort_values('ordem_fluxo')
+    df_agg = df.groupby('local_servico').agg({
+        'total_vagas': 'sum',
+        'vagas_ocupadas': 'sum',
+        'vagas_livres': 'sum'
+    }).reset_index()
+
+    df_melt = df_agg.melt(
+        id_vars='local_servico',
+        value_vars=['vagas_ocupadas', 'vagas_livres'],
+        var_name='tipo',
+        value_name='quantidade'
+    )
 
     fig = px.bar(
-        df_agg,
-        x='departamento',
+        df_melt,
+        x='local_servico',
         y='quantidade',
+        color='tipo',
         title='',
-        labels={'departamento': '', 'quantidade': 'Total'},
-        color='ordem_fluxo',
-        color_continuous_scale='Viridis'
+        labels={'local_servico': '', 'quantidade': 'Vagas', 'tipo': ''},
+        barmode='stack',
+        color_discrete_map={
+            'vagas_ocupadas': '#3B82F6',
+            'vagas_livres': '#10B981'
+        }
     )
 
     fig.update_layout(
         paper_bgcolor='white',
         plot_bgcolor='white',
-        font=dict(color='#374151'),
-        margin=dict(l=10, r=10, t=10, b=10),
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
         height=280,
-        showlegend=False,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
         xaxis=dict(showgrid=True, gridcolor='#f3f4f6'),
-        yaxis=dict(showgrid=True, gridcolor='#f3f4f6')
+        yaxis=dict(showgrid=True, gridcolor='#f3f4f6', showticklabels=False)
+    )
+    fig.update_xaxes(tickangle=45, gridcolor='#f3f4f6', ticks='outside')
+    fig.update_yaxes(gridcolor='#f3f4f6', ticks='outside')
+
+    return fig
+
+
+def create_especie_chart():
+    """Placeholder para gráfico de espécie (donut)"""
+    fig = go.Figure()
+
+    # Dados placeholder - podem ser substituídos por dados reais
+    fig.add_trace(go.Pie(
+        values=[45, 35, 20],
+        labels=['Canina', 'Felina', 'Outras'],
+        hole=0.5,
+        marker=dict(colors=['#3B82F6', '#8B5CF6', '#10B981'])
+    ))
+
+    fig.update_layout(
+        paper_bgcolor='white',
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
+        height=280,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+    )
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+
+    return fig
+
+
+def create_genero_chart():
+    """Placeholder para gráfico de gênero (donut)"""
+    fig = go.Figure()
+
+    # Dados placeholder - podem ser substituídos por dados reais
+    fig.add_trace(go.Pie(
+        values=[55, 45],
+        labels=['Macho', 'Fêmea'],
+        hole=0.5,
+        marker=dict(colors=['#3B82F6', '#EC4899'])
+    ))
+
+    fig.update_layout(
+        paper_bgcolor='white',
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
+        height=280,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+    )
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+
+    return fig
+
+
+def create_gauge_castracoes(valor, meta):
+    """Gauge de progresso de castrações"""
+    progresso = min((valor / meta) * 100, 100)
+
+    fig = go.Figure(go.Indicator(
+        mode='gauge+number+delta',
+        value=valor,
+        number={'font': {'size': 36, 'color': '#374151'}, 'suffix': f' / {meta}'},
+        delta={'reference': meta, 'position': 'bottom'},
+        gauge={
+            'axis': {'range': [0, meta], 'tickwidth': 1, 'tickcolor': '#374151'},
+            'bar': {'color': '#3B82F6'},
+            'steps': [
+                {'range': [0, meta * 0.5], 'color': '#FEE2E2'},
+                {'range': [meta * 0.5, meta * 0.75], 'color': '#FEF3C7'},
+                {'range': [meta * 0.75, meta], 'color': '#D1FAE5'}
+            ],
+            'threshold': {
+                'line': {'color': '#1c2c51', 'width': 4},
+                'value': meta
+            }
+        }
+    ))
+
+    fig.update_layout(
+        paper_bgcolor='white',
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
+        height=300
     )
 
     return fig
 
 
+def create_status_solicitacoes_chart(df):
+    """Gráfico de status de solicitações"""
+    if df is None or df.empty:
+        return create_empty_figure()
+
+    df_agg = df.groupby('status_fila').agg({'quantidade': 'sum'}).reset_index()
+
+    status_map = {
+        'waiting': 'Aguardando',
+        'calling': 'Em Atendimento',
+        'called': 'Concluído',
+        'cancelled': 'Cancelado'
+    }
+    df_agg['status_fila'] = df_agg['status_fila'].map(status_map)
+
+    fig = px.pie(
+        df_agg,
+        values='quantidade',
+        names='status_fila',
+        title='',
+        color_discrete_sequence=['#8B5CF6', '#3B82F6', '#10B981', '#EF4444']
+    )
+
+    fig.update_layout(
+        paper_bgcolor='white',
+        font=dict(color='#374151', family='DM Sans, sans-serif'),
+        margin=dict(l=12, r=12, t=40, b=12),
+        height=280,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+    )
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+
+    return fig
+
+
+# ─── Funções de Tabelas ─────────────────────────────────────────────────────
+def create_nao_table(df):
+    if df is None or df.empty:
+        return html.Div('Sem dados para exibir', className='empty-state')
+
+    columns_to_show = ['booking_id', 'data_agendamento', 'local_servico', 'nome_tutor', 'cpf', 'nome_animal', 'porte', 'era_prioridade']
+    df_display = df[[c for c in columns_to_show if c in df.columns]].head(50).copy()
+
+    if 'data_agendamento' in df_display.columns:
+        df_display['data_agendamento'] = pd.to_datetime(df_display['data_agendamento']).dt.strftime('%d/%m/%Y')
+
+    columns_renamed = {
+        'data_agendamento': 'Data',
+        'local_servico': 'Local',
+        'nome_tutor': 'Tutor',
+        'cpf': 'CPF',
+        'booking_id': 'Protocolo',
+        'nome_animal': 'Animal',
+        'porte': 'Porte',
+        'era_prioridade': 'Prioridade'
+    }
+    df_display = df_display.rename(columns=columns_renamed)
+
+    from dash import dash_table
+    return dash_table.DataTable(
+        data=df_display.to_dict('records'),
+        columns=[{'name': i, 'id': i} for i in df_display.columns],
+        page_size=10,
+        style_table={'overflowX': 'auto'},
+        style_header={
+            'backgroundColor': '#1c2c51',
+            'fontWeight': '600',
+            'color': 'white',
+            'borderBottom': '2px solid #3B82F6',
+            'textAlign': 'center',
+            'padding': '12px',
+            'fontFamily': 'Sora, sans-serif',
+            'fontSize': '0.78rem',
+            'textTransform': 'uppercase',
+            'letterSpacing': '0.06em'
+        },
+        style_cell={
+            'padding': '10px',
+            'fontFamily': 'DM Sans, sans-serif',
+            'fontSize': '0.86rem',
+            'color': '#374151',
+            'borderBottom': '1px solid rgba(28, 44, 81, 0.10)',
+            'textAlign': 'left'
+        },
+        style_data={'backgroundColor': 'white'},
+        style_data_conditional=[
+            {'if': {'row_index': 'odd'}, 'backgroundColor': '#f9fafb'},
+            {'if': {'column_id': 'Prioridade', 'filter_query': '{Prioridade} = "Sim"'}, 'color': '#EF4444', 'fontWeight': '600'}
+        ],
+        style_as_list_view=True,
+        sort_action='native',
+    )
+
+
 def create_fluxo_table(df):
-    if df.empty:
+    if df is None or df.empty:
         return html.Div('Sem dados para exibir', className='empty-state')
 
     columns_to_show = ['departamento', 'ordem_fluxo', 'status', 'quantidade', 'qtd_waiting', 'qtd_calling', 'qtd_called', 'qtd_cancelled']
@@ -771,19 +1022,23 @@ def create_fluxo_table(df):
         page_size=15,
         style_table={'overflowX': 'auto'},
         style_header={
-            'backgroundColor': '#1a1a2e',
+            'backgroundColor': '#1c2c51',
             'fontWeight': '600',
             'color': 'white',
             'borderBottom': '2px solid #3B82F6',
             'textAlign': 'center',
-            'padding': '12px'
+            'padding': '12px',
+            'fontFamily': 'Sora, sans-serif',
+            'fontSize': '0.78rem',
+            'textTransform': 'uppercase',
+            'letterSpacing': '0.06em'
         },
         style_cell={
-            'padding': '12px',
-            'fontFamily': '"Inter", sans-serif',
-            'fontSize': '13px',
+            'padding': '10px',
+            'fontFamily': 'DM Sans, sans-serif',
+            'fontSize': '0.86rem',
             'color': '#374151',
-            'borderBottom': '1px solid #e5e7eb',
+            'borderBottom': '1px solid rgba(28, 44, 81, 0.10)',
             'textAlign': 'center'
         },
         style_data={'backgroundColor': 'white'},
@@ -792,6 +1047,9 @@ def create_fluxo_table(df):
         sort_action='native',
     )
 
+
+# ─── Server ─────────────────────────────────────────────────────────────────
 app = app.server
+
 if __name__ == '__main__':
-    app.run(debug=False,  port=8050)
+    app.run(debug=False, port=8050)

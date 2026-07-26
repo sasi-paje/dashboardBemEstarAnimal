@@ -205,6 +205,34 @@ WHERE is_active = true
 ORDER BY name
 """
 
+QUERY_ESPECIES = """
+SELECT DISTINCT especie FROM vw_bi_nao_compareceram_detalhado WHERE especie IS NOT NULL ORDER BY especie
+"""
+
+QUERY_RACAS = """
+SELECT DISTINCT raca FROM vw_bi_nao_compareceram_detalhado WHERE raca IS NOT NULL ORDER BY raca
+"""
+
+QUERY_GENEROS = """
+SELECT DISTINCT sexo AS genero FROM vw_bi_nao_compareceram_detalhado WHERE sexo IS NOT NULL ORDER BY sexo
+"""
+
+QUERY_MUNICIPIOS = """
+SELECT DISTINCT municipio FROM vw_bi_nao_compareceram_detalhado WHERE municipio IS NOT NULL ORDER BY municipio
+"""
+
+QUERY_BAIRROS = """
+SELECT DISTINCT bairro FROM vw_bi_nao_compareceram_detalhado WHERE bairro IS NOT NULL ORDER BY bairro
+"""
+
+QUERY_TELEFONES = """
+SELECT DISTINCT telefone FROM vw_bi_nao_compareceram_detalhado WHERE telefone IS NOT NULL ORDER BY telefone
+"""
+
+QUERY_CPFS = """
+SELECT DISTINCT cpf FROM vw_bi_nao_compareceram_detalhado WHERE cpf IS NOT NULL ORDER BY cpf
+"""
+
 def get_vagas(local=None, servico=None, departamento=None):
     return execute_query_dataframe(
         QUERY_VAGAS,
@@ -287,9 +315,176 @@ def get_filter_options():
         print(f"Error in get_filter_options: {e}")
         return [], [], []
 
-# ============================================
-# Novas funções para Views BI temporais
-# ============================================
+def get_especies():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_ESPECIES)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_especies: {e}")
+        return []
+
+def get_racas():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_RACAS)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_racas: {e}")
+        return []
+
+def get_generos():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_GENEROS)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_generos: {e}")
+        return []
+
+def get_municipios():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_MUNICIPIOS)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_municipios: {e}")
+        return []
+
+def get_bairros():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_BAIRROS)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_bairros: {e}")
+        return []
+
+def get_telefones():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_TELEFONES)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_telefones: {e}")
+        return []
+
+def get_cpfs():
+    try:
+        conn = get_connection_simple()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(QUERY_CPFS)
+                return [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in get_cpfs: {e}")
+        return []
+
+def get_data(date_from=None, date_to=None, local=None, servico=None):
+    return get_fact_resumo(date_from, date_to, local, servico)
+
+def get_campanhas_ativas(date_from=None, date_to=None, local=None, servico=None):
+    return get_vagas_temporal(date_from, date_to, local, servico)
+
+def get_guinnes_atendimentos():
+    return pd.DataFrame(columns=['horario', 'total'])
+
+def get_solicitacoes():
+    return pd.DataFrame(columns=['id', 'status', 'servico_campanha', 'municipio', 'bairro', 'telefone', 'cpf', 'genero', 'especie'])
+
+def get_check_in_count():
+    return 0
+
+def get_nao_comparecimento_count(date_from=None, date_to=None, local=None, servico=None):
+    kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
+    return kpis.get('nao_compareceram', 0)
+
+def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
+    query = """
+    SELECT
+        COALESCE(SUM(f.total_vagas), 0) AS total_vagas,
+        COALESCE(SUM(f.vagas_ocupadas), 0) AS vagas_ocupadas,
+        COALESCE(SUM(f.vagas_nao_confirmadas), 0) AS vagas_livres,
+        COALESCE(AVG(f.taxa_ocupacao_pct), 0) AS taxa_ocupacao,
+        COALESCE(SUM(f.em_fila), 0) AS em_fila,
+        COALESCE(SUM(f.waiting), 0) AS waiting,
+        COALESCE(SUM(f.calling), 0) AS calling,
+        COALESCE(SUM(f.called), 0) AS called,
+        COALESCE(SUM(f.nao_compareceram), 0) AS nao_compareceram
+    FROM vw_bi_fact_resumo f
+    JOIN vw_bi_dim_local dl ON f.site_service_id = dl.site_service_id
+    WHERE 1=1
+    """
+    params = []
+    if date_from:
+        query += " AND f.data >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND f.data <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND dl.local_servico = %s"
+        params.append(local)
+    if servico:
+        query += " AND dl.servico = %s"
+        params.append(servico)
+
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_kpis_fact_resumo, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params) if params else None)
+
+    if df.empty or df.iloc[0]['total_vagas'] is None:
+        return {
+            'total_vagas': 0,
+            'vagas_ocupadas': 0,
+            'vagas_livres': 0,
+            'taxa_ocupacao': 0,
+            'em_fila': 0,
+            'waiting': 0,
+            'calling': 0,
+            'called': 0,
+            'nao_compareceram': 0
+        }
+
+    return {
+        'total_vagas': int(df.iloc[0]['total_vagas']),
+        'vagas_ocupadas': int(df.iloc[0]['vagas_ocupadas']),
+        'vagas_livres': int(df.iloc[0]['vagas_livres']),
+        'taxa_ocupacao': round(float(df.iloc[0]['taxa_ocupacao']), 1),
+        'em_fila': int(df.iloc[0]['em_fila']),
+        'waiting': int(df.iloc[0]['waiting']),
+        'calling': int(df.iloc[0]['calling']),
+        'called': int(df.iloc[0]['called']),
+        'nao_compareceram': int(df.iloc[0]['nao_compareceram'])
+    }
 
 def get_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
     query = """
@@ -476,7 +671,7 @@ def get_nao_compareceram_por_local(date_from=None, date_to=None):
 
 def get_nao_compareceram_detalhado(date_from=None, date_to=None, local=None, servico=None, limit=1000):
     query = """
-    SELECT 
+    SELECT
         data_agendamento,
         ano_mes,
         dia_semana,
@@ -553,7 +748,7 @@ def get_atendimentos_por_hora(date_from=None, date_to=None):
 
 def get_tempo_medio(date_from=None, date_to=None):
     query = """
-    SELECT 
+    SELECT
         data,
         site_service_id,
         local_servico,
@@ -582,72 +777,11 @@ def get_tempo_medio(date_from=None, date_to=None):
         print(f"Error in get_tempo_medio, falling back to pool: {e}")
         return execute_query_dataframe(query, tuple(params) if params else None)
 
-def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
-    query = """
-    SELECT
-        COALESCE(SUM(f.total_vagas), 0) AS total_vagas,
-        COALESCE(SUM(f.vagas_ocupadas), 0) AS vagas_ocupadas,
-        COALESCE(SUM(f.vagas_nao_confirmadas), 0) AS vagas_livres,
-        COALESCE(AVG(f.taxa_ocupacao_pct), 0) AS taxa_ocupacao,
-        COALESCE(SUM(f.em_fila), 0) AS em_fila,
-        COALESCE(SUM(f.waiting), 0) AS waiting,
-        COALESCE(SUM(f.calling), 0) AS calling,
-        COALESCE(SUM(f.called), 0) AS called,
-        COALESCE(SUM(f.nao_compareceram), 0) AS nao_compareceram
-    FROM vw_bi_fact_resumo f
-    JOIN vw_bi_dim_local dl ON f.site_service_id = dl.site_service_id
-    WHERE 1=1
-    """
-    params = []
-    if date_from:
-        query += " AND f.data >= %s"
-        params.append(date_from)
-    if date_to:
-        query += " AND f.data <= %s"
-        params.append(date_to)
-    if local:
-        query += " AND dl.local_servico = %s"
-        params.append(local)
-    if servico:
-        query += " AND dl.servico = %s"
-        params.append(servico)
-
-    try:
-        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
-    except Exception as e:
-        print(f"Error in get_kpis_fact_resumo, falling back to pool: {e}")
-        df = execute_query_dataframe(query, tuple(params) if params else None)
-
-    if df.empty or df.iloc[0]['total_vagas'] is None:
-        return {
-            'total_vagas': 0,
-            'vagas_ocupadas': 0,
-            'vagas_livres': 0,
-            'taxa_ocupacao': 0,
-            'em_fila': 0,
-            'waiting': 0,
-            'calling': 0,
-            'called': 0,
-            'nao_compareceram': 0
-        }
-
-    return {
-        'total_vagas': int(df.iloc[0]['total_vagas']),
-        'vagas_ocupadas': int(df.iloc[0]['vagas_ocupadas']),
-        'vagas_livres': int(df.iloc[0]['vagas_livres']),
-        'taxa_ocupacao': round(float(df.iloc[0]['taxa_ocupacao']), 1),
-        'em_fila': int(df.iloc[0]['em_fila']),
-        'waiting': int(df.iloc[0]['waiting']),
-        'calling': int(df.iloc[0]['calling']),
-        'called': int(df.iloc[0]['called']),
-        'nao_compareceram': int(df.iloc[0]['nao_compareceram'])
-    }
-
 def get_departamentos_flow(date_from=None, date_to=None, local=None):
     df = get_fluxo_departamentos(date_from, date_to, local)
     if df.empty:
         return pd.DataFrame()
-    
+
     agg_df = df.groupby(['departamento', 'ordem_fluxo', 'status']).agg({
         'quantidade': 'sum',
         'qtd_waiting': 'sum',
@@ -655,5 +789,5 @@ def get_departamentos_flow(date_from=None, date_to=None, local=None):
         'qtd_called': 'sum',
         'qtd_cancelled': 'sum'
     }).reset_index()
-    
+
     return agg_df.sort_values(['ordem_fluxo', 'status'])
