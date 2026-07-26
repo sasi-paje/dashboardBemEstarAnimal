@@ -430,9 +430,9 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None)
     SELECT
         COALESCE(SUM(f.total_vagas), 0) AS total_vagas,
         COALESCE(SUM(f.vagas_ocupadas), 0) AS vagas_ocupadas,
-        COALESCE(SUM(f.vagas_nao_confirmadas), 0) AS vagas_livres,
-        COALESCE(AVG(f.taxa_ocupacao_pct), 0) AS taxa_ocupacao,
-        COALESCE(SUM(f.em_fila), 0) AS em_fila,
+        COALESCE(SUM(f.total_vagas), 0) - COALESCE(SUM(f.vagas_ocupadas), 0) AS vagas_livres,
+        ROUND(COALESCE(SUM(f.vagas_ocupadas), 0)::numeric / NULLIF(COALESCE(SUM(f.total_vagas), 0), 0) * 100, 1) AS taxa_ocupacao,
+        COALESCE(SUM(f.waiting), 0) + COALESCE(SUM(f.calling), 0) AS em_fila,
         COALESCE(SUM(f.waiting), 0) AS waiting,
         COALESCE(SUM(f.calling), 0) AS calling,
         COALESCE(SUM(f.called), 0) AS called,
