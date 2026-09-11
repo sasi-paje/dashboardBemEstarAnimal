@@ -425,7 +425,7 @@ def get_nao_comparecimento_count(date_from=None, date_to=None, local=None, servi
     kpis = get_kpis_fact_resumo(date_from, date_to, local, servico)
     return kpis.get('nao_compareceram', 0)
 
-def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
+def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None, weekend_only=False):
     query = """
     SELECT
         COALESCE(SUM(f.total_vagas), 0) AS total_vagas,
@@ -454,6 +454,8 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None)
     if servico:
         query += " AND dl.servico = %s"
         params.append(servico)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM f.data) IN (0, 6)"
 
     try:
         df = execute_query_dataframe_simple(query, tuple(params) if params else None)
@@ -624,7 +626,7 @@ def get_fila_temporal(date_from=None, date_to=None, local=None, servico=None, de
         print(f"Error in get_fila_temporal, falling back to pool: {e}")
         return execute_query_dataframe(query, tuple(params) if params else None)
 
-def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=None):
+def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=None, weekend_only=False):
     query = """
     SELECT
         data,
@@ -661,6 +663,8 @@ def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=No
     if servico:
         query += " AND servico = %s"
         params.append(servico)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM data) IN (0, 6)"
     query += " ORDER BY data DESC, local_servico, ordem_fluxo, ordem_status LIMIT 500"
     try:
         return execute_query_dataframe_simple(query, tuple(params) if params else None)
@@ -813,3 +817,102 @@ def get_departamentos_flow(date_from=None, date_to=None, local=None):
     }).reset_index()
 
     return agg_df.sort_values(['ordem_fluxo', 'status'])
+
+
+# ─── Tela "Dashboard" (redesign estilo SEMMA) ──────────────────────────────
+
+def get_totais_acumulados(local=None):
+    """Vagas ocupadas acumuladas por serviço, sem filtro de período (para os widgets do hero)."""
+    query = """
+    SELECT dl.servico, COALESCE(SUM(f.vagas_ocupadas), 0) AS total_ocupadas
+    FROM vw_bi_fact_resumo f
+    JOIN vw_bi_dim_local dl ON f.site_service_id = dl.site_service_id
+    WHERE 1=1
+    """
+    params = []
+    if local:
+        query += " AND dl.local_servico = %s"
+        params.append(local)
+    query += " GROUP BY dl.servico"
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_totais_acumulados, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params) if params else None)
+
+    result = {'Castração': 0, 'Vacinação': 0}
+    for _, row in df.iterrows():
+        if row['servico'] in result:
+            result[row['servico']] = int(row['total_ocupadas'])
+    return result
+
+
+def get_atendimentos_por_mes(date_from=None, date_to=None, local=None, weekend_only=False):
+    """Vagas ocupadas por mês/serviço, para o gráfico 'Volume do período'."""
+    query = """
+    SELECT
+        TO_CHAR(f.data, 'YYYY-MM') AS ano_mes,
+        dl.servico,
+        COALESCE(SUM(f.vagas_ocupadas), 0) AS total_ocupadas
+    FROM vw_bi_fact_resumo f
+    JOIN vw_bi_dim_local dl ON f.site_service_id = dl.site_service_id
+    WHERE 1=1
+    """
+    params = []
+    if date_from:
+        query += " AND f.data >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND f.data <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND dl.local_servico = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM f.data) IN (0, 6)"
+    query += " GROUP BY TO_CHAR(f.data, 'YYYY-MM'), dl.servico ORDER BY 1"
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_atendimentos_por_mes, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
+
+
+def get_especies_vacinacao(date_from=None, date_to=None, local=None, weekend_only=False):
+    """Quebra Canino/Felino das doses de vacinação aplicadas (só cobre agendamentos com pet_id vinculado)."""
+    query = """
+    SELECT
+        CASE b.id_specie WHEN 1 THEN 'Canino' WHEN 2 THEN 'Felino' ELSE 'Outro' END AS especie,
+        COUNT(*) AS total
+    FROM sk_booking sk
+    JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN pet p ON sk.pet_id = p.id
+    JOIN breed b ON p.breed_id = b.id
+    WHERE svc.service_name = 'Vacinação'
+      AND sk.status IS NOT NULL
+    """
+    params = []
+    if date_from:
+        query += " AND sk.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND sk.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM sk.service_date) IN (0, 6)"
+    query += " GROUP BY b.id_specie"
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_especies_vacinacao, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params) if params else None)
+
+    result = {'Canino': 0, 'Felino': 0}
+    for _, row in df.iterrows():
+        if row['especie'] in result:
+            result[row['especie']] = int(row['total'])
+    return result
