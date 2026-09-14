@@ -436,7 +436,9 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None,
         COALESCE(SUM(f.waiting), 0) AS waiting,
         COALESCE(SUM(f.calling), 0) AS calling,
         COALESCE(SUM(f.called), 0) AS called,
-        COALESCE(SUM(f.nao_compareceram), 0) AS nao_compareceram
+        COALESCE(SUM(f.nao_compareceram), 0) AS nao_compareceram,
+        COALESCE(SUM(f.vagas_scheduled), 0) AS vagas_scheduled,
+        COALESCE(SUM(f.vagas_checked_in), 0) AS vagas_checked_in
     FROM vw_bi_fact_resumo f
     JOIN vw_bi_dim_local dl ON f.site_service_id = dl.site_service_id
     WHERE 1=1
@@ -473,7 +475,9 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None,
             'waiting': 0,
             'calling': 0,
             'called': 0,
-            'nao_compareceram': 0
+            'nao_compareceram': 0,
+            'vagas_scheduled': 0,
+            'vagas_checked_in': 0
         }
 
     return {
@@ -485,7 +489,9 @@ def get_kpis_fact_resumo(date_from=None, date_to=None, local=None, servico=None,
         'waiting': int(df.iloc[0]['waiting']),
         'calling': int(df.iloc[0]['calling']),
         'called': int(df.iloc[0]['called']),
-        'nao_compareceram': int(df.iloc[0]['nao_compareceram'])
+        'nao_compareceram': int(df.iloc[0]['nao_compareceram']),
+        'vagas_scheduled': int(df.iloc[0]['vagas_scheduled']),
+        'vagas_checked_in': int(df.iloc[0]['vagas_checked_in'])
     }
 
 def get_fact_resumo(date_from=None, date_to=None, local=None, servico=None):
@@ -671,6 +677,71 @@ def get_fluxo_departamentos(date_from=None, date_to=None, local=None, servico=No
     except Exception as e:
         print(f"Error in get_fluxo_departamentos, falling back to pool: {e}")
         return execute_query_dataframe(query, tuple(params) if params else None)
+
+def get_fluxo_historico_departamentos(date_from=None, date_to=None, local=None, servico=None, weekend_only=False):
+    """
+    Quantas vezes cada status de cada departamento foi de fato atingido, usando o
+    LOG de movimentação (log_call_queue_department) — não o snapshot atual da fila.
+    Isso importa porque sk_call_queue guarda só o status ATUAL de cada item: quando
+    um animal avança de "Recepção" para "Assinatura de Termo", o registro de que ele
+    passou pela Recepção desaparece do snapshot (some da fila, não do histórico).
+    Sem essa fonte, uma etapa "de passagem" como Recepção aparenta erroneamente 0.
+    """
+    query = """
+    SELECT d.name AS departamento, d.flow_order AS ordem_fluxo,
+           cds.name AS status, cds.flow_order AS ordem_status,
+           COUNT(*) AS quantidade
+    FROM log_call_queue_department lcqd
+    JOIN sk_call_queue cq ON lcqd.id_call_queue = cq.id
+    JOIN sk_sites_services ss ON cq.id_site_service = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN cfg_service_department_status csds ON lcqd.id_service_department_status = csds.id
+    JOIN cfg_departaments_status cds ON csds.id_department_status = cds.id
+    JOIN ref_departments d ON cds.id_department = d.id
+    WHERE cq.service_date IS NOT NULL
+    """
+    params = []
+    if date_from:
+        query += " AND cq.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND cq.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if servico:
+        query += " AND svc.service_name = %s"
+        params.append(servico)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM cq.service_date) IN (0, 6)"
+    query += " GROUP BY d.name, d.flow_order, cds.name, cds.flow_order"
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_fluxo_historico_departamentos, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
+
+def get_departamentos_configurados(servico):
+    """
+    Departamentos cadastrados para o serviço (cfg_service_departments), independente
+    de já existir movimentação na fila. Usado para exibir a etapa mesmo com 0 registros
+    (ex: "Recepção" configurada mas ainda sem nenhum atendimento no fluxo) em vez de a
+    etapa simplesmente desaparecer do card "Etapas de..." por causa do INNER JOIN da view.
+    """
+    query = """
+    SELECT d.id AS department_id, d.name AS departamento, d.flow_order AS ordem_fluxo
+    FROM cfg_service_departments sd
+    JOIN ref_departments d ON sd.id_department = d.id
+    JOIN sk_service svc ON sd.id_service = svc.id
+    WHERE svc.service_name = %s
+    ORDER BY d.flow_order
+    """
+    try:
+        return execute_query_dataframe_simple(query, (servico,))
+    except Exception as e:
+        print(f"Error in get_departamentos_configurados, falling back to pool: {e}")
+        return execute_query_dataframe(query, (servico,))
 
 def get_nao_compareceram_por_local(date_from=None, date_to=None):
     query = """
@@ -916,3 +987,272 @@ def get_especies_vacinacao(date_from=None, date_to=None, local=None, weekend_onl
         if row['especie'] in result:
             result[row['especie']] = int(row['total'])
     return result
+
+
+# ─── Tela de detalhe: Vacinação ──────────────────────────────────────────
+# Só o que existe de verdade no sistema: agendamento (sk_booking.status
+# 'scheduled'/'checked_in'), pet.gender, breed.id_specie e o catálogo real
+# de vacinas aplicadas (trx_vaccine_application). Nada aqui é inventado —
+# onde o design do cliente pedia uma categoria que não existe no banco
+# (ex: "recusada pelo tutor"), a tela usa só as categorias reais.
+
+def get_locais_atendidos(date_from=None, date_to=None, local=None, weekend_only=False, servico='Vacinação'):
+    """Quantidade de locais (sites) distintos com pelo menos 1 agendamento no período."""
+    query = """
+    SELECT COUNT(DISTINCT s.id) AS locais_atendidos
+    FROM sk_booking sk
+    JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN sk_sites s ON ss.id_site = s.id
+    WHERE svc.service_name = %s
+      AND sk.status IS NOT NULL
+    """
+    params = [servico]
+    if date_from:
+        query += " AND sk.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND sk.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM sk.service_date) IN (0, 6)"
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params))
+    except Exception as e:
+        print(f"Error in get_locais_atendidos, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params))
+    if df.empty or df.iloc[0]['locais_atendidos'] is None:
+        return 0
+    return int(df.iloc[0]['locais_atendidos'])
+
+
+def get_desfechos_agendamento(date_from=None, date_to=None, local=None, weekend_only=False, servico='Vacinação'):
+    """
+    Desfecho real do agendamento: só existem 2 estados no sistema
+    (scheduled = agendado, checked_in = compareceu). Categorias como
+    "recusada"/"contraindicada" do mockup genérico não são rastreadas aqui.
+    """
+    query = """
+    SELECT sk.status, COUNT(*) AS total
+    FROM sk_booking sk
+    JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    WHERE svc.service_name = %s
+      AND sk.status IS NOT NULL
+    """
+    params = [servico]
+    if date_from:
+        query += " AND sk.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND sk.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM sk.service_date) IN (0, 6)"
+    query += " GROUP BY sk.status"
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params))
+    except Exception as e:
+        print(f"Error in get_desfechos_agendamento, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params))
+
+    result = {'checked_in': 0, 'scheduled': 0}
+    for _, row in df.iterrows():
+        if row['status'] in result:
+            result[row['status']] = int(row['total'])
+    return result
+
+
+def get_perfil_animais(date_from=None, date_to=None, local=None, weekend_only=False, servico='Vacinação'):
+    """Quebra Fêmeas/Machos por espécie (Canino/Felino) — pet.gender + breed.id_specie."""
+    query = """
+    SELECT
+        CASE b.id_specie WHEN 1 THEN 'Canino' WHEN 2 THEN 'Felino' ELSE 'Outro' END AS especie,
+        p.gender AS sexo,
+        COUNT(*) AS total
+    FROM sk_booking sk
+    JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN pet p ON sk.pet_id = p.id
+    JOIN breed b ON p.breed_id = b.id
+    WHERE svc.service_name = %s
+      AND sk.status IS NOT NULL
+      AND p.gender IN ('F', 'M')
+    """
+    params = [servico]
+    if date_from:
+        query += " AND sk.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND sk.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM sk.service_date) IN (0, 6)"
+    query += " GROUP BY especie, p.gender"
+    try:
+        return execute_query_dataframe_simple(query, tuple(params))
+    except Exception as e:
+        print(f"Error in get_perfil_animais, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params))
+
+
+def get_composicao_doses(date_from=None, date_to=None, local=None, weekend_only=False):
+    """Doses aplicadas por tipo de vacina (trx_vaccine_application -> master_vaccine -> ref_vaccine_type)."""
+    query = """
+    SELECT COALESCE(rvt.name, 'Não classificado') AS tipo_vacina, COUNT(*) AS total
+    FROM trx_vaccine_application tva
+    LEFT JOIN master_vaccine mv ON tva.id_vaccine = mv.id
+    LEFT JOIN ref_vaccine_type rvt ON mv.id_vaccine_type = rvt.id
+    LEFT JOIN sk_booking bk ON tva.booking_id = bk.id
+    LEFT JOIN sk_sites_services ss ON bk.id_site_sevice = ss.id
+    LEFT JOIN sk_sites s ON ss.id_site = s.id
+    WHERE 1=1
+    """
+    params = []
+    if date_from:
+        query += " AND tva.application_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND tva.application_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM tva.application_date) IN (0, 6)"
+    query += " GROUP BY rvt.name ORDER BY total DESC"
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_composicao_doses, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)
+
+
+def get_distribuicao_territorial(date_from=None, date_to=None, local=None, weekend_only=False, servico='Vacinação'):
+    """Agendamentos por local (site) — usado para o Top 5 + 'Outros' da Distribuição territorial."""
+    query = """
+    SELECT s.site_name AS local_nome, COUNT(*) AS total
+    FROM sk_booking sk
+    JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN sk_sites s ON ss.id_site = s.id
+    WHERE svc.service_name = %s
+      AND sk.status IS NOT NULL
+    """
+    params = [servico]
+    if date_from:
+        query += " AND sk.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND sk.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM sk.service_date) IN (0, 6)"
+    query += " GROUP BY s.site_name ORDER BY total DESC"
+    try:
+        return execute_query_dataframe_simple(query, tuple(params))
+    except Exception as e:
+        print(f"Error in get_distribuicao_territorial, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params))
+
+
+# ─── Filtro avançado: Espécie ───────────────────────────────────────────────
+# A view vw_bi_fact_resumo é agregada por (data, site_service) e não guarda o
+# pet — não dá pra filtrar por espécie a partir dela. Por isso os números
+# "por espécie" são recalculados aqui direto de sk_booking/sk_call_queue com
+# join em pet/breed (mesmo padrão já usado em get_especies_vacinacao/
+# get_perfil_animais). "Total de vagas"/"vagas livres"/"taxa de ocupação" não
+# têm um recorte por espécie que faça sentido (a vaga em si não é de um
+# animal até ser ocupada), por isso não entram aqui.
+def get_kpis_por_especie(date_from=None, date_to=None, local=None, servico=None, weekend_only=False, especie_id=None):
+    query = """
+    SELECT
+        COUNT(*) FILTER (WHERE sk.status IS NOT NULL) AS vagas_ocupadas,
+        COUNT(*) FILTER (WHERE sk.status = 'scheduled') AS vagas_scheduled,
+        COUNT(*) FILTER (WHERE sk.status = 'checked_in') AS vagas_checked_in
+    FROM sk_booking sk
+    JOIN sk_sites_services ss ON sk.id_site_sevice = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN pet p ON sk.pet_id = p.id
+    JOIN breed b ON p.breed_id = b.id
+    WHERE 1=1
+    """
+    params = []
+    if especie_id:
+        query += " AND b.id_specie = %s"
+        params.append(especie_id)
+    if date_from:
+        query += " AND sk.service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        query += " AND sk.service_date <= %s"
+        params.append(date_to)
+    if local:
+        query += " AND ss.name = %s"
+        params.append(local)
+    if servico:
+        query += " AND svc.service_name = %s"
+        params.append(servico)
+    if weekend_only:
+        query += " AND EXTRACT(DOW FROM sk.service_date) IN (0, 6)"
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_kpis_por_especie, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params) if params else None)
+
+    if df.empty or df.iloc[0]['vagas_ocupadas'] is None:
+        return {'vagas_ocupadas': 0, 'vagas_scheduled': 0, 'vagas_checked_in': 0, 'em_fila': 0}
+
+    query_fila = """
+    SELECT COUNT(*) AS em_fila
+    FROM sk_call_queue cq
+    JOIN sk_sites_services ss ON cq.id_site_service = ss.id
+    JOIN sk_service svc ON ss.id_service = svc.id
+    JOIN pet p ON cq.id_pet = p.id
+    JOIN breed b ON p.breed_id = b.id
+    WHERE cq.status IN ('waiting', 'calling')
+    """
+    params_fila = []
+    if especie_id:
+        query_fila += " AND b.id_specie = %s"
+        params_fila.append(especie_id)
+    if date_from:
+        query_fila += " AND cq.service_date >= %s"
+        params_fila.append(date_from)
+    if date_to:
+        query_fila += " AND cq.service_date <= %s"
+        params_fila.append(date_to)
+    if local:
+        query_fila += " AND ss.name = %s"
+        params_fila.append(local)
+    if servico:
+        query_fila += " AND svc.service_name = %s"
+        params_fila.append(servico)
+    if weekend_only:
+        query_fila += " AND EXTRACT(DOW FROM cq.service_date) IN (0, 6)"
+    try:
+        df_fila = execute_query_dataframe_simple(query_fila, tuple(params_fila) if params_fila else None)
+    except Exception as e:
+        print(f"Error in get_kpis_por_especie (fila), falling back to pool: {e}")
+        df_fila = execute_query_dataframe(query_fila, tuple(params_fila) if params_fila else None)
+    em_fila = int(df_fila.iloc[0]['em_fila']) if not df_fila.empty and df_fila.iloc[0]['em_fila'] is not None else 0
+
+    return {
+        'vagas_ocupadas': int(df.iloc[0]['vagas_ocupadas']),
+        'vagas_scheduled': int(df.iloc[0]['vagas_scheduled']),
+        'vagas_checked_in': int(df.iloc[0]['vagas_checked_in']),
+        'em_fila': em_fila,
+    }

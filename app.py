@@ -11,14 +11,37 @@ from db import (
     get_campanhas_encerradas,
     get_fila_temporal,
     get_fluxo_departamentos,
+    get_fluxo_historico_departamentos,
     get_departamentos_flow,
+    get_departamentos_configurados,
     get_filter_options,
     get_totais_acumulados,
     get_atendimentos_por_mes,
     get_especies_vacinacao,
+    get_locais_atendidos,
+    get_desfechos_agendamento,
+    get_perfil_animais,
+    get_composicao_doses,
+    get_distribuicao_territorial,
+    get_kpis_por_especie,
 )
 
 LOCAL_CENTRO_ZOONOSES = 'Unidade de Vigilância e Controle de Zoonoses-UVCZ'
+
+# Registros anteriores a esta data são "legados" (migrados de antes do sistema
+# atual entrar em produção). O aviso amarelo no Dashboard avisa quando esses
+# registros estão sendo somados aos KPIs/gráficos; "Remover filtro" apenas
+# aplica um filtro de data (oculta da visão), não apaga nada do banco.
+DATA_CORTE_LEGADO = '2026-01-01'
+
+# Opções reais do "Filtro avançado" — carregadas uma vez na inicialização
+# (não mudam por requisição). Se a consulta falhar por qualquer motivo, os
+# dropdowns simplesmente ficam só com "Todos" em vez de derrubar o app.
+try:
+    _LOCAIS_REAIS, _SERVICOS_REAIS, _ = get_filter_options()
+except Exception as e:
+    print(f"Aviso: não foi possível carregar opções do filtro avançado: {e}")
+    _LOCAIS_REAIS, _SERVICOS_REAIS = [], []
 
 MESES_PT = {
     '01': 'Jan', '02': 'Fev', '03': 'Mar', '04': 'Abr', '05': 'Mai', '06': 'Jun',
@@ -27,7 +50,10 @@ MESES_PT = {
 
 app = dash.Dash(
     __name__,
-    external_stylesheets=['/assets/style.css'],
+    external_stylesheets=[
+        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css',
+        '/assets/style.css',
+    ],
     suppress_callback_exceptions=True
 )
 
@@ -48,8 +74,9 @@ def create_empty_figure():
         paper_bgcolor='white',
         plot_bgcolor='white',
         font=dict(color='#9ca3af'),
-        xaxis=dict(showgrid=False, showticklabels=False),
-        yaxis=dict(showgrid=False, showticklabels=False),
+        dragmode=False,
+        xaxis=dict(showgrid=False, showticklabels=False, fixedrange=True),
+        yaxis=dict(showgrid=False, showticklabels=False, fixedrange=True),
         height=280
     )
     fig.add_annotation(text='Sem dados disponíveis', showarrow=False, font=dict(size=14, color='#9ca3af'))
@@ -145,12 +172,19 @@ DASHBOARD_FILTER_PANEL = html.Div([
         )
     ], className='sv2-date-field'),
 
+    html.Button(
+        html.Div(className='sv2-funnel-icon'),
+        id='dash-filter-icon-btn',
+        className='sv2-filter-icon-btn',
+        title='Filtros'
+    ),
+
     dcc.RadioItems(
         id='dash-quick-filter',
         options=[
-            {'label': 'Todos', 'value': 'todos'},
-            {'label': 'Centro de Zoonoses', 'value': 'zoonoses'},
-            {'label': 'Fim de semana', 'value': 'weekend'},
+            {'label': [html.I(className='fa-solid fa-table-cells'), html.Span('Todos')], 'value': 'todos'},
+            {'label': [html.I(className='fa-solid fa-building'), html.Span('Centro de Zoonoses')], 'value': 'zoonoses'},
+            {'label': [html.I(className='fa-regular fa-calendar'), html.Span('Fim de semana')], 'value': 'weekend'},
         ],
         value='todos',
         className='sv2-pill-group',
@@ -163,14 +197,122 @@ DASHBOARD_FILTER_PANEL = html.Div([
 ], className='sv2-filter-panel')
 
 
+# ─── Filtro avançado (painel do botão de funil) ────────────────────────────
+# Mesma regra de sempre: precisa existir de forma ESTÁTICA no layout (visível
+# ou não via 'style') — os dropdowns aqui dentro são Input do callback
+# principal, então não podem ser recriados dentro do próprio conteúdo dinâmico.
+ADV_FILTER_PANEL = html.Div([
+    html.Div([
+        html.Label('Local de serviço', className='sv2-field-label'),
+        dcc.Dropdown(
+            id='adv-local',
+            options=[{'label': l, 'value': l} for l in _LOCAIS_REAIS],
+            value=None,
+            placeholder='Todos',
+            clearable=True,
+            className='sv2-adv-dropdown'
+        ),
+    ], className='sv2-adv-field'),
+
+    html.Div([
+        html.Label('Serviço', className='sv2-field-label'),
+        dcc.Dropdown(
+            id='adv-servico',
+            options=[{'label': 'Todos', 'value': 'todos'}] +
+                    [{'label': s, 'value': s} for s in _SERVICOS_REAIS],
+            value='todos',
+            clearable=False,
+            className='sv2-adv-dropdown'
+        ),
+    ], className='sv2-adv-field'),
+
+    html.Div([
+        html.Label('Espécie', className='sv2-field-label'),
+        dcc.Dropdown(
+            id='adv-especie',
+            options=[
+                {'label': 'Todas', 'value': 'todas'},
+                {'label': 'Cão', 'value': '1'},
+                {'label': 'Gato', 'value': '2'},
+            ],
+            value='todas',
+            clearable=False,
+            className='sv2-adv-dropdown'
+        ),
+    ], className='sv2-adv-field'),
+
+    html.Div([
+        html.Label('Origem dos registros', className='sv2-field-label'),
+        dcc.RadioItems(
+            id='adv-origem',
+            options=[
+                {'label': 'Sistema', 'value': 'sistema'},
+                {'label': 'Ambos', 'value': 'ambos'},
+                {'label': 'Histórico', 'value': 'historico'},
+            ],
+            value='ambos',
+            className='sv2-pill-group',
+            inputClassName='sv2-pill-input',
+            labelClassName='sv2-pill-label',
+        ),
+    ], className='sv2-adv-field'),
+], id='adv-filter-panel', className='sv2-adv-panel', style={'display': 'none'})
+
+
+# ─── Aviso de dados legados ─────────────────────────────────────────────────
+# Precisa existir de forma ESTÁTICA no layout (não gerado dentro do próprio
+# callback que o usa como Input) para o botão "Remover filtro" não criar uma
+# dependência circular com 'dashboard-content'. A visibilidade é controlada
+# via Output(..., 'style'), não recriando os children a cada render.
+LEGACY_WARNING_BANNER = html.Div([
+    html.Div([
+        html.Span('⚠', className='sv2-warning__icon'),
+        html.Span(
+            'Registros anteriores ao sistema estão sendo contabilizados',
+            className='sv2-warning__text'
+        ),
+    ], className='sv2-warning__left'),
+    html.Button('Remover filtro', id='dash-btn-remover-legado', className='sv2-warning__btn'),
+], id='legacy-warning-banner', className='sv2-warning-banner')
+
+
+# ─── Link "Voltar ao panorama" ──────────────────────────────────────────────
+# Mesmo motivo do aviso de dados legados: precisa existir de forma ESTÁTICA
+# (sempre no layout) para o Dash conseguir registrar o clique. Se ele só
+# existisse quando view-mode='vacinacao', o próprio callback de navegação
+# (que o usa como Input) nunca dispararia — nem para abrir a tela pela
+# primeira vez — porque o Dash exige que todo Input de um callback já
+# exista em algum lugar do layout atual, mesmo que oculto.
+VIEW_BACK_LINK = html.A(
+    [html.Span('←'), html.Span(' Voltar ao panorama')],
+    id='btn-voltar-panorama', n_clicks=0, className='sv2-back-link',
+    style={'display': 'none'}
+)
+
+
 # ─── Layout Principal ───────────────────────────────────────────────────────
 # Este app é responsável apenas pela tela de Dashboard — a navegação entre
 # seções (Departamentos, Campanhas, etc.) já é feita pelo sistema principal.
 app.layout = html.Div([
     dcc.Store(id='last-update', data=None),
+    dcc.Store(id='view-mode', data='panorama'),
 
     html.Div([
-        DASHBOARD_FILTER_PANEL,
+        VIEW_BACK_LINK,
+        html.Div([
+            html.Div([
+                html.Div(id='hero-container'),
+                DASHBOARD_FILTER_PANEL,
+            ], className='sv2-hero-filter-card'),
+            ADV_FILTER_PANEL,
+        ], className='sv2-hero-filter-anchor'),
+        LEGACY_WARNING_BANNER,
+        html.Div(id='kpi-row-container'),
+        # "Portas de entrada" precisa existir SEMPRE no DOM — o botão que
+        # abre a tela de Vacinação (btn-abrir-vacinacao) vive dentro dela.
+        # Mesmo raciocínio do link "Voltar": some visualmente via 'style',
+        # nunca sai da árvore de componentes.
+        html.Div(id='entry-section-container'),
         html.Div(id='dashboard-content'),
     ], className='sv2-page-body'),
 
@@ -182,11 +324,49 @@ app.layout = html.Div([
 ], className='app-container sv2-standalone')
 
 
+# ─── Navegação Panorama ↔ telas de detalhe (Vacinação/Castração) ───────────
+# Callback separado do render_dashboard: os botões "abrir" (↗) ficam dentro
+# do conteúdo dinâmico (dashboard-content) e o link "Voltar" fica dentro de
+# view-back-link — ambos gerados pelo PRÓPRIO render_dashboard. Se fossem
+# Input desse mesmo callback, criaria uma dependência circular (o mesmo bug
+# que já corrigimos no aviso de dados legados). Por isso a troca de view-mode
+# vive num callback à parte.
+@callback(
+    Output('view-mode', 'data'),
+    [Input('btn-abrir-vacinacao', 'n_clicks'),
+     Input('btn-abrir-castracao', 'n_clicks'),
+     Input('btn-voltar-panorama', 'n_clicks')],
+    prevent_initial_call=True
+)
+def toggle_view_mode(n_abrir_vacinacao, n_abrir_castracao, n_voltar):
+    if ctx.triggered_id == 'btn-abrir-vacinacao':
+        return 'vacinacao'
+    if ctx.triggered_id == 'btn-abrir-castracao':
+        return 'castracao'
+    return 'panorama'
+
+
+# ─── Abrir/fechar o painel "Filtro avançado" ───────────────────────────────
+@callback(
+    Output('adv-filter-panel', 'style'),
+    Input('dash-filter-icon-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+def toggle_adv_filter_panel(n_clicks):
+    return {} if (n_clicks or 0) % 2 == 1 else {'display': 'none'}
+
+
 # ─── Callback da tela de Dashboard ──────────────────────────────────────────
 # Datas e pill são Input (não State): a tela reage na hora, sem precisar
 # clicar em "Filtrar" — o botão fica só como atalho/confirmação visual.
 @callback(
-    [Output('dashboard-content', 'children'),
+    [Output('hero-container', 'children'),
+     Output('kpi-row-container', 'children'),
+     Output('entry-section-container', 'children'),
+     Output('entry-section-container', 'style'),
+     Output('dashboard-content', 'children'),
+     Output('legacy-warning-banner', 'style'),
+     Output('btn-voltar-panorama', 'style'),
      Output('dash-date-start', 'date'),
      Output('dash-date-end', 'date'),
      Output('dash-quick-filter', 'value')],
@@ -195,14 +375,80 @@ app.layout = html.Div([
      Input('dash-quick-filter', 'value'),
      Input('dash-btn-filtrar', 'n_clicks'),
      Input('dash-btn-limpar', 'n_clicks'),
+     Input('dash-btn-remover-legado', 'n_clicks'),
+     Input('view-mode', 'data'),
+     Input('adv-local', 'value'),
+     Input('adv-servico', 'value'),
+     Input('adv-especie', 'value'),
+     Input('adv-origem', 'value'),
      Input('interval-component', 'n_intervals')]
 )
-def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_intervals):
+def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_remover_legado, view_mode,
+                      adv_local, adv_servico, adv_especie, adv_origem, n_intervals):
     if ctx.triggered_id == 'dash-btn-limpar':
         date_start, date_end, quick_filter = None, None, 'todos'
-        return render_dashboard_tab(date_start, date_end, quick_filter), date_start, date_end, quick_filter
+    elif ctx.triggered_id == 'dash-btn-remover-legado':
+        # Só aplica um filtro de data (data >= corte) para ocultar os
+        # registros legados da visão — não apaga nada do banco.
+        date_start = DATA_CORTE_LEGADO
 
-    return render_dashboard_tab(date_start, date_end, quick_filter), dash.no_update, dash.no_update, dash.no_update
+    date_from = date_start or None
+    date_to = date_end or None
+
+    # "Origem dos registros" (filtro avançado): Sistema = só data >= corte
+    # (mesmo efeito do "Remover filtro" do aviso); Histórico = só data < corte
+    # (só os registros legados); Ambos = sem essa restrição extra.
+    if adv_origem == 'sistema':
+        date_from = max(date_from, DATA_CORTE_LEGADO) if date_from else DATA_CORTE_LEGADO
+    elif adv_origem == 'historico':
+        dia_anterior_corte = (datetime.strptime(DATA_CORTE_LEGADO, '%Y-%m-%d') - relativedelta(days=1)).strftime('%Y-%m-%d')
+        date_to = min(date_to, dia_anterior_corte) if date_to else dia_anterior_corte
+
+    # "Local de serviço" do filtro avançado tem prioridade sobre a pill
+    # "Centro de Zoonoses" quando os dois estão ativos (o avançado é mais
+    # específico — dá pra escolher qualquer um dos locais reais, não só esse).
+    local_filter = adv_local or (LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None)
+    weekend_only = quick_filter == 'weekend'
+    servico_filter = adv_servico if adv_servico and adv_servico != 'todos' else None
+    especie_id = int(adv_especie) if adv_especie and adv_especie != 'todas' else None
+
+    # "Portas de entrada" é renderizada SEMPRE (mesmo fora do panorama) —
+    # é onde vive o botão que abre a tela de Vacinação. Só fica invisível
+    # via 'style' quando não estamos no panorama.
+    kpis_vacina_entry = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
+    kpis_castra_entry = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
+    especies_entry = get_especies_vacinacao(date_from, date_to, local_filter, weekend_only)
+    entry_section = build_entry_section(kpis_vacina_entry, especies_entry, kpis_castra_entry)
+    entry_style = {} if view_mode == 'panorama' else {'display': 'none'}
+
+    if view_mode == 'vacinacao':
+        hero = build_hero_vacinacao(date_start, date_end, quick_filter)
+        kpi_row, rest_content = render_vacinacao_tab(date_start, date_end, quick_filter, local_filter, especie_id)
+        warning_style = {'display': 'none'}
+        back_link_style = {}
+    elif view_mode == 'castracao':
+        hero = build_hero_castracao(date_start, date_end, quick_filter)
+        kpi_row, rest_content = render_castracao_tab(date_start, date_end, quick_filter, local_filter, especie_id)
+        warning_style = {'display': 'none'}
+        back_link_style = {}
+    else:
+        hero = build_hero(get_totais_acumulados())
+        kpi_row, rest_content = render_dashboard_tab(
+            date_start, date_end, quick_filter, local_filter, servico_filter, especie_id
+        )
+        show_legacy_warning = date_start is None or date_start < DATA_CORTE_LEGADO
+        warning_style = {} if show_legacy_warning else {'display': 'none'}
+        back_link_style = {'display': 'none'}
+
+    base = (hero, kpi_row, entry_section, entry_style, rest_content, warning_style, back_link_style)
+
+    if ctx.triggered_id == 'dash-btn-limpar':
+        return base + (date_start, date_end, quick_filter)
+
+    if ctx.triggered_id == 'dash-btn-remover-legado':
+        return base + (date_start, dash.no_update, dash.no_update)
+
+    return base + (dash.no_update, dash.no_update, dash.no_update)
 
 
 # ─── KPI Card Helper ────────────────────────────────────────────────────────
@@ -215,30 +461,52 @@ def kpi_card(value, label, variant='blue', icon=''):
 
 
 # ─── Tab: Dashboard (réplica visual SEMMA) ──────────────────────────────────
-def render_dashboard_tab(date_start, date_end, quick_filter):
+def apply_especie_override(kpis_base, date_from, date_to, local, servico, weekend_only, especie_id):
+    """
+    Substitui vagas_ocupadas/scheduled/checked_in/em_fila pelo recorte de
+    espécie (Cão/Gato), mantendo os demais campos (total_vagas, vagas_livres,
+    taxa_ocupacao, nao_compareceram) como estavam — não existe um recorte de
+    espécie que faça sentido pra "vaga livre"/"taxa de ocupação" (a vaga só
+    passa a ser de um animal quando ocupada).
+    """
+    if not especie_id:
+        return kpis_base
+    especie_kpis = get_kpis_por_especie(date_from, date_to, local, servico, weekend_only, especie_id)
+    merged = dict(kpis_base)
+    merged.update(especie_kpis)
+    return merged
+
+
+def render_dashboard_tab(date_start, date_end, quick_filter, local_filter=None, servico_filter=None, especie_id=None):
     date_from = date_start or None
     date_to = date_end or None
-    local_filter = LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None
     weekend_only = quick_filter == 'weekend'
 
-    totais = get_totais_acumulados()
-    kpis_all = get_kpis_fact_resumo(date_from, date_to, local_filter, None, weekend_only)
+    kpis_all = get_kpis_fact_resumo(date_from, date_to, local_filter, servico_filter, weekend_only)
     kpis_vacina = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
     kpis_castra = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
-    especies = get_especies_vacinacao(date_from, date_to, local_filter, weekend_only)
-    df_mes = get_atendimentos_por_mes(date_from, date_to, local_filter, weekend_only)
-    df_fluxo = get_fluxo_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
 
-    return html.Div([
-        build_hero(totais),
-        build_kpi_row(kpis_all, kpis_vacina, kpis_castra),
-        build_entry_section(kpis_vacina, especies, kpis_castra),
-        build_month_chart(df_mes),
+    if especie_id:
+        kpis_all = apply_especie_override(kpis_all, date_from, date_to, local_filter, servico_filter, weekend_only, especie_id)
+        kpis_vacina = apply_especie_override(kpis_vacina, date_from, date_to, local_filter, 'Vacinação', weekend_only, especie_id)
+        kpis_castra = apply_especie_override(kpis_castra, date_from, date_to, local_filter, 'Castração', weekend_only, especie_id)
+
+    df_mes = get_atendimentos_por_mes(date_from, date_to, local_filter, weekend_only)
+    df_fluxo_historico = get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
+    df_departamentos = get_departamentos_configurados('Castração')
+
+    # "Portas de entrada" (build_entry_section) NÃO entra aqui — é renderizada
+    # à parte pelo callback principal, num container sempre presente no DOM
+    # (ver comentário em app.layout / entry-section-container).
+    kpi_row = build_kpi_row(kpis_all, kpis_vacina, kpis_castra, quick_filter)
+    rest = html.Div([
+        build_month_chart(df_mes, quick_filter, servico_filter),
         html.Div([
             build_capacity_card(kpis_all),
-            build_flow_card(df_fluxo),
+            build_flow_card(df_fluxo_historico, df_departamentos),
         ], className='sv2-bottom-row'),
     ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+    return kpi_row, rest
 
 
 def build_hero(totais):
@@ -265,29 +533,57 @@ def build_hero(totais):
     ], className='sv2-hero')
 
 
-def sv2_kpi_card(icon, icon_bg, label, value):
+def sv2_kpi_card(icon_class, icon_bg, icon_color, label, value):
     return html.Div([
         html.Div([
-            html.Div(icon, className='sv2-kpi-card__icon', style={'background': icon_bg}),
+            html.Div(
+                html.I(className=icon_class),
+                className='sv2-kpi-card__icon',
+                style={'background': icon_bg, 'color': icon_color}
+            ),
             html.Div(label, className='sv2-kpi-card__label'),
         ], className='sv2-kpi-card__top'),
         html.Div(value, className='sv2-kpi-card__value'),
     ], className='sv2-kpi-card')
 
 
-def build_kpi_row(kpis_all, kpis_vacina, kpis_castra):
+def build_kpi_row(kpis_all, kpis_vacina, kpis_castra, quick_filter=None):
+    # Com qualquer filtro rápido além de "Todos" (Centro de Zoonoses ou Fim de
+    # semana), o serviço funciona por agendamento — em vez do total genérico de
+    # "Castrações", separa o que já foi realizado (compareceu/checked-in) do
+    # que ainda está agendado para os próximos dias.
+    if quick_filter in ('zoonoses', 'weekend'):
+        return html.Div([
+            sv2_kpi_card('fa-solid fa-paw', '#E7F2EA', 'var(--sv2-green-700)',
+                         'Castrações realizadas', format_number(kpis_castra['vagas_checked_in'])),
+            sv2_kpi_card('fa-solid fa-syringe', '#E7F2EA', 'var(--sv2-green-700)',
+                         'Vacinações aplicadas', format_number(kpis_vacina['vagas_ocupadas'])),
+            sv2_kpi_card('fa-regular fa-calendar-check', '#E7F2EA', 'var(--sv2-green-700)',
+                         'Castrações agendadas', format_number(kpis_castra['vagas_scheduled'])),
+            sv2_kpi_card('fa-regular fa-clock', '#FDEEF0', '#C1447E',
+                         'Fila de castração', format_number(kpis_castra['em_fila'])),
+        ], className='sv2-kpi-grid')
+
     return html.Div([
-        sv2_kpi_card('📅', '#E7F2EA', 'Atendimentos totais', format_number(kpis_all['vagas_ocupadas'])),
-        sv2_kpi_card('💉', '#E7F2EA', 'Vacinações totais', format_number(kpis_vacina['vagas_ocupadas'])),
-        sv2_kpi_card('✂️', '#E7F2EA', 'Castrações totais', format_number(kpis_castra['vagas_ocupadas'])),
-        sv2_kpi_card('⏱️', '#FDEEF0', 'Fila de castração', format_number(kpis_castra['em_fila'])),
+        sv2_kpi_card('fa-solid fa-calendar-days', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Atendimentos totais', format_number(kpis_all['vagas_ocupadas'])),
+        sv2_kpi_card('fa-solid fa-syringe', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Vacinações totais', format_number(kpis_vacina['vagas_ocupadas'])),
+        sv2_kpi_card('fa-solid fa-paw', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Castrações totais', format_number(kpis_castra['vagas_ocupadas'])),
+        sv2_kpi_card('fa-regular fa-clock', '#FDEEF0', '#C1447E',
+                     'Fila de castração', format_number(kpis_castra['em_fila'])),
     ], className='sv2-kpi-grid')
 
 
-def sv2_entry_card(icon, badge_text, title, desc, stats):
+def sv2_entry_card(icon_class, badge_text, title, desc, stats, expand_id=None):
+    # O clique fica no CARTÃO INTEIRO (não só na setinha) — a setinha continua
+    # só como indicação visual, sem id/n_clicks próprio; o clique nela borbulha
+    # pro cartão do mesmo jeito.
+    card_kwargs = {'id': expand_id, 'n_clicks': 0} if expand_id else {}
     return html.Div([
         html.Div([
-            html.Div(icon, className='sv2-entry-card__icon'),
+            html.Div(html.I(className=icon_class), className='sv2-entry-card__icon'),
             html.Div(badge_text, className='sv2-entry-card__badge'),
             html.Div('↗', className='sv2-entry-card__expand'),
         ], className='sv2-entry-card__top'),
@@ -301,12 +597,12 @@ def sv2_entry_card(icon, badge_text, title, desc, stats):
                 ]) for s_label, s_value in stats
             ], className='sv2-entry-card__stats'),
         ], className='sv2-entry-card__body'),
-    ], className='sv2-entry-card')
+    ], className='sv2-entry-card', **card_kwargs)
 
 
 def build_entry_section(kpis_vacina, especies, kpis_castra):
     vacina_card = sv2_entry_card(
-        '💉',
+        'fa-solid fa-syringe',
         f"{format_number(kpis_vacina['vagas_ocupadas'])} aplicadas",
         'Vacinação',
         'Aplicação por demanda espontânea: acompanhe cobertura, doses aplicadas e estoque das campanhas.',
@@ -314,10 +610,11 @@ def build_entry_section(kpis_vacina, especies, kpis_castra):
             ('Doses aplicadas', kpis_vacina['vagas_ocupadas']),
             ('Caninos', especies.get('Canino', 0)),
             ('Felinos', especies.get('Felino', 0)),
-        ]
+        ],
+        expand_id='btn-abrir-vacinacao'
     )
     castracao_card = sv2_entry_card(
-        '✂️',
+        'fa-solid fa-paw',
         f"{format_number(kpis_castra['em_fila'])} em fila",
         'Castração',
         'Acompanhe a jornada pré-operatória, a execução do procedimento e as altas.',
@@ -325,18 +622,23 @@ def build_entry_section(kpis_vacina, especies, kpis_castra):
             ('Realizadas', kpis_castra['vagas_ocupadas']),
             ('Vagas livres', kpis_castra['vagas_livres']),
             ('Em fila', kpis_castra['em_fila']),
-        ]
+        ],
+        expand_id='btn-abrir-castracao'
     )
     return html.Div([
         html.Div([
-            html.Div('Portas de entrada', className='sv2-card__eyebrow'),
-            html.Div('Escolha um serviço para aprofundar a operação', className='sv2-card__title'),
-        ]),
+            html.Div([
+                html.Div('Portas de entrada', className='sv2-card__eyebrow'),
+                html.Div('Escolha um serviço para aprofundar a operação', className='sv2-card__title'),
+            ]),
+            html.Div('Clique para abrir os dados específicos', className='sv2-entry-hint'),
+        ], className='sv2-card__header-row'),
         html.Div([vacina_card, castracao_card], className='sv2-entry-row'),
     ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '12px'})
 
 
-def build_month_chart(df_mes):
+def build_month_chart(df_mes, quick_filter=None, servico_filter=None):
+    chart_title = 'Atendimentos no centro de zoonoses' if quick_filter == 'zoonoses' else 'Atendimentos por mês'
     total_vac = total_cas = 0
     if df_mes is None or df_mes.empty:
         fig = create_empty_figure()
@@ -347,35 +649,50 @@ def build_month_chart(df_mes):
         mes_labels = [MESES_PT.get(idx[5:7], idx) for idx in pivot.index]
         vac_vals = pivot['Vacinação'] if 'Vacinação' in pivot.columns else [0] * len(pivot)
         cas_vals = pivot['Castração'] if 'Castração' in pivot.columns else [0] * len(pivot)
+        # Filtro avançado "Serviço": mostra só a barra do serviço escolhido.
+        if servico_filter == 'Vacinação':
+            cas_vals = [0] * len(pivot)
+        elif servico_filter == 'Castração':
+            vac_vals = [0] * len(pivot)
         total_vac = int(sum(vac_vals))
         total_cas = int(sum(cas_vals))
 
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=mes_labels, y=vac_vals, name='Vacinação', marker_color='#1F9E4D',
+        fig.add_trace(go.Bar(x=mes_labels, y=vac_vals, name='Vacinação',
+                              marker=dict(color='#1F9E4D', cornerradius=6),
                               text=vac_vals, textposition='outside'))
-        fig.add_trace(go.Bar(x=mes_labels, y=cas_vals, name='Castração', marker_color='#A9D9BB',
+        fig.add_trace(go.Bar(x=mes_labels, y=cas_vals, name='Castração',
+                              marker=dict(color='#A9D9BB', cornerradius=6),
                               text=cas_vals, textposition='outside'))
         fig.update_layout(
             barmode='group',
+            bargap=0.4,
+            bargroupgap=0.05,
             paper_bgcolor='white', plot_bgcolor='white',
             font=dict(family='Inter, sans-serif', color='#1F2937'),
             margin=dict(l=12, r=12, t=12, b=12),
             height=280,
             showlegend=False,
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor='#F3F4F6', showticklabels=False),
+            # Sem zoom por arraste (clicar e arrastar não deve distorcer o
+            # gráfico) — mantém só o hover, que é inofensivo.
+            dragmode=False,
+            xaxis=dict(showgrid=False, fixedrange=True),
+            yaxis=dict(
+                showgrid=True, gridcolor='#F3F4F6', showticklabels=True,
+                tickfont=dict(size=11, color='#9CA3AF'), fixedrange=True
+            ),
         )
 
     return html.Div([
         html.Div([
             html.Div([
                 html.Div('Volume do período', className='sv2-card__eyebrow'),
-                html.Div('Atendimentos por mês', className='sv2-card__title'),
+                html.Div(chart_title, className='sv2-card__title'),
             ]),
             html.Div([
-                html.Span(f'● Vacinação  {format_number(total_vac)}',
+                html.Span(f'■ Vacinação  {format_number(total_vac)}',
                           style={'color': '#1F9E4D', 'fontWeight': 700, 'marginRight': '16px'}),
-                html.Span(f'● Castração  {format_number(total_cas)}',
+                html.Span(f'■ Castração  {format_number(total_cas)}',
                           style={'color': '#A9D9BB', 'fontWeight': 700}),
             ]),
         ], className='sv2-card__header-row'),
@@ -421,22 +738,45 @@ def build_capacity_card(kpis_all):
     ], className='sv2-card')
 
 
-def build_flow_card(df_fluxo):
-    if df_fluxo is None or df_fluxo.empty:
+def build_flow_card(df_fluxo, df_departamentos=None):
+    # Quantidade real por departamento, a partir do HISTÓRICO de movimentação
+    # (log_call_queue_department) — não do snapshot atual da fila. O snapshot
+    # só guarda o status ATUAL de cada item, então uma etapa "de passagem"
+    # (ex: Recepção, antes de avançar) apareceria zerada ali mesmo com
+    # movimento real. Usa o MAIOR valor entre os status do departamento — o
+    # primeiro status ao entrar é sempre o pico (quem chega, depois "vaza"
+    # pros status seguintes, então a contagem só cai ou mantém).
+    quantidades = {}
+    if df_fluxo is not None and not df_fluxo.empty:
+        agg = df_fluxo.groupby('departamento')['quantidade'].max()
+        for nome, qtd in agg.items():
+            quantidades[nome] = int(qtd)
+
+    if df_departamentos is not None and not df_departamentos.empty:
+        # Sempre mostra TODAS as etapas cadastradas para o serviço (mesmo as que
+        # ainda não tiveram nenhum atendimento passar por elas) — evita a etapa
+        # simplesmente desaparecer do card quando a fila real ainda está vazia.
+        rows = df_departamentos.sort_values('ordem_fluxo').itertuples(index=False)
+        steps = [(r.departamento, quantidades.get(r.departamento, 0)) for r in rows]
+    elif quantidades:
+        rows = df_fluxo.groupby(['departamento', 'ordem_fluxo'], as_index=False)['quantidade'].max() \
+            .sort_values('ordem_fluxo').itertuples(index=False)
+        steps = [(r.departamento, r.quantidade) for r in rows]
+    else:
+        steps = []
+
+    if not steps:
         body = html.Div('Sem dados para exibir', className='empty-state')
     else:
-        agg = df_fluxo.groupby(['departamento', 'ordem_fluxo'], as_index=False)['quantidade'].sum()
-        agg = agg.sort_values('ordem_fluxo')
-        steps = list(agg.itertuples(index=False))
-        max_val = max([s.quantidade for s in steps], default=1) or 1
+        max_val = max((qtd for _, qtd in steps), default=1) or 1
 
         step_divs = []
-        for i, s in enumerate(steps, start=1):
-            pct = round((s.quantidade / max_val) * 100, 1)
+        for i, (nome, qtd) in enumerate(steps, start=1):
+            pct = round((qtd / max_val) * 100, 1)
             step_divs.append(html.Div([
                 html.Div(str(i), className='sv2-flow-step__badge'),
-                html.Div(s.departamento, className='sv2-flow-step__label'),
-                html.Div(format_number(s.quantidade), className='sv2-flow-step__value'),
+                html.Div(nome, className='sv2-flow-step__label'),
+                html.Div(format_number(qtd), className='sv2-flow-step__value'),
                 html.Div(
                     html.Div(className='sv2-flow-step__fill', style={'width': f'{pct}%'}),
                     className='sv2-flow-step__track'
@@ -451,6 +791,435 @@ def build_flow_card(df_fluxo):
         ], className='sv2-card__header-row'),
         body,
     ], className='sv2-card')
+
+
+# ─── Tela de detalhe: Vacinação (réplica visual SEMMA) ─────────────────────
+# Só usa categorias que existem de verdade no sistema. Onde o mockup do
+# cliente tinha algo que não é rastreado aqui (ex: "recusada pelo tutor"),
+# a tela mostra só o que é real (ver conversa/decisão registrada com o
+# cliente): Desfechos = Compareceu/Agendado; Composição das doses aparece
+# mesmo com 1 categoria só; Distribuição territorial = Top 5 + "Outros".
+def build_hero_vacinacao(date_start, date_end, quick_filter):
+    date_from = date_start or None
+    date_to = date_end or None
+    local_filter = LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None
+    weekend_only = quick_filter == 'weekend'
+
+    kpis_vacina = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
+    totais = get_totais_acumulados()
+
+    def stat(label, value, sub):
+        return html.Div([
+            html.Div(label, className='sv2-hero__stat-label'),
+            html.Div(format_number(value), className='sv2-hero__stat-value'),
+            html.Div(sub, className='sv2-hero__stat-sub'),
+        ], className='sv2-hero__stat')
+
+    return html.Div([
+        html.Div([
+            html.Div(html.I(className='fa-solid fa-syringe'), className='sv2-hero__icon-badge'),
+            html.Div([
+                html.Div('Vacinação', className='sv2-hero__title'),
+                html.Div('Aplicação por demanda espontânea, sem agendamento', className='sv2-hero__subtitle'),
+            ]),
+        ], className='sv2-hero__title-row'),
+        html.Div([
+            stat('No período', kpis_vacina['vagas_ocupadas'], 'doses aplicadas'),
+            stat('Acumulado', totais.get('Vacinação', 0), 'doses no total'),
+        ], className='sv2-hero__stats'),
+    ], className='sv2-hero')
+
+
+def render_vacinacao_tab(date_start, date_end, quick_filter, local_filter=None, especie_id=None):
+    date_from = date_start or None
+    date_to = date_end or None
+    local_filter = local_filter or (LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None)
+    weekend_only = quick_filter == 'weekend'
+
+    kpis_vacina = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
+    if especie_id:
+        # Espécie entra só nas "Doses aplicadas" (o KPI principal) — Locais
+        # atendidos/Desfechos/Composição/Distribuição territorial continuam
+        # olhando para todas as espécies juntas por enquanto.
+        kpis_vacina = apply_especie_override(
+            kpis_vacina, date_from, date_to, local_filter, 'Vacinação', weekend_only, especie_id
+        )
+    locais_atendidos = get_locais_atendidos(date_from, date_to, local_filter, weekend_only, 'Vacinação')
+    desfechos = get_desfechos_agendamento(date_from, date_to, local_filter, weekend_only, 'Vacinação')
+    df_perfil = get_perfil_animais(date_from, date_to, local_filter, weekend_only, 'Vacinação')
+    df_composicao = get_composicao_doses(date_from, date_to, local_filter, weekend_only)
+    df_territorial = get_distribuicao_territorial(date_from, date_to, local_filter, weekend_only, 'Vacinação')
+
+    doses_aplicadas = kpis_vacina['vagas_ocupadas']
+    media_por_posto = round(doses_aplicadas / locais_atendidos) if locais_atendidos else 0
+    total_desfecho = desfechos['checked_in'] + desfechos['scheduled']
+    taxa_aplicacao = round(desfechos['checked_in'] / total_desfecho * 100, 1) if total_desfecho else 0
+
+    kpi_row = build_vacinacao_kpi_row(doses_aplicadas, locais_atendidos, media_por_posto, taxa_aplicacao)
+    rest = html.Div([
+        html.Div([
+            build_desfechos_card(desfechos),
+            build_perfil_animais_card(df_perfil),
+        ], className='sv2-bottom-row'),
+        html.Div([
+            build_composicao_doses_card(df_composicao),
+            build_distribuicao_territorial_card(df_territorial),
+        ], className='sv2-bottom-row'),
+    ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+    return kpi_row, rest
+
+
+def build_vacinacao_kpi_row(doses_aplicadas, locais_atendidos, media_por_posto, taxa_aplicacao):
+    return html.Div([
+        sv2_kpi_card('fa-solid fa-syringe', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Doses aplicadas', format_number(doses_aplicadas)),
+        sv2_kpi_card('fa-solid fa-location-dot', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Locais atendidos', format_number(locais_atendidos)),
+        sv2_kpi_card('fa-solid fa-chart-column', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Média por posto', format_number(media_por_posto)),
+        sv2_kpi_card('fa-solid fa-percent', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Taxa de aplicação', f'{taxa_aplicacao}%'),
+    ], className='sv2-kpi-grid')
+
+
+def build_bar_row(color, label, value, pct):
+    # O número/percentual mostrado continua exato (ex: "4  0.0%" quando o valor
+    # é mesmo residual) — só a LARGURA VISUAL da barra tem um mínimo, senão
+    # qualquer valor pequeno-mas-real (ex: 4 de 14.914 = 0,03%) desenha uma
+    # barra com largura 0%, que parece vazia/quebrada mesmo tendo dado.
+    bar_width = max(pct, 1.5) if value else 0
+    return html.Div([
+        html.Div([
+            html.Div([
+                html.Span(className='sv2-bar-row__dot', style={'background': color}),
+                html.Span(label, className='sv2-bar-row__label'),
+            ], className='sv2-bar-row__left'),
+            html.Div(f'{format_number(value)}  {pct}%', className='sv2-bar-row__value'),
+        ], className='sv2-bar-row__top'),
+        html.Div(
+            html.Div(className='sv2-bar-row__fill', style={'width': f'{bar_width}%', 'background': color}),
+            className='sv2-bar-row__track'
+        ),
+    ], className='sv2-bar-row')
+
+
+def build_desfechos_card(desfechos):
+    total = desfechos['checked_in'] + desfechos['scheduled']
+
+    def pct(v):
+        return round(v / total * 100, 1) if total else 0
+
+    rows = [
+        build_bar_row('#1F9E4D', 'Compareceu', desfechos['checked_in'], pct(desfechos['checked_in'])),
+        build_bar_row('#3F99CD', 'Agendado', desfechos['scheduled'], pct(desfechos['scheduled'])),
+    ]
+    return html.Div([
+        html.Div([
+            html.Div('Desfechos', className='sv2-card__eyebrow'),
+            html.Div('Resultado dos atendimentos', className='sv2-card__title'),
+        ]),
+        html.Div(rows, className='sv2-bar-row-list'),
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+
+
+def build_perfil_animais_card(df_perfil):
+    if df_perfil is None or df_perfil.empty:
+        body = html.Div('Sem dados para exibir', className='empty-state')
+    else:
+        sections = []
+        for especie, especie_label in [('Canino', 'Caninos'), ('Felino', 'Felinos')]:
+            sub = df_perfil[df_perfil['especie'] == especie]
+            femeas = int(sub[sub['sexo'] == 'F']['total'].sum())
+            machos = int(sub[sub['sexo'] == 'M']['total'].sum())
+            total_especie = femeas + machos
+            if total_especie == 0:
+                continue
+            pct_f = round(femeas / total_especie * 100, 1)
+            pct_m = round(machos / total_especie * 100, 1)
+            sections.append(html.Div([
+                html.Div(f'{especie_label} — {format_number(total_especie)} animais',
+                          className='sv2-perfil__especie-title'),
+                build_bar_row('#DE6E6E', 'Fêmeas', femeas, pct_f),
+                build_bar_row('#3F99CD', 'Machos', machos, pct_m),
+            ], className='sv2-perfil__especie'))
+        body = html.Div(sections, className='sv2-bar-row-list') if sections \
+            else html.Div('Sem dados para exibir', className='empty-state')
+
+    return html.Div([
+        html.Div([
+            html.Div('Perfil dos animais', className='sv2-card__eyebrow'),
+            html.Div('Fêmeas e machos por espécie', className='sv2-card__title'),
+        ]),
+        body,
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+
+
+def build_composicao_doses_card(df_composicao):
+    if df_composicao is None or df_composicao.empty:
+        return html.Div([
+            html.Div('Composição das doses', className='sv2-card__eyebrow'),
+            html.Div('Vacinas aplicadas por tipo', className='sv2-card__title'),
+            html.Div('Sem dados para exibir', className='empty-state'),
+        ], className='sv2-card')
+
+    total = int(df_composicao['total'].sum())
+    colors = ['#1F9E4D', '#3F99CD', '#8B5CF6', '#F5A623', '#EF4444', '#94A3B8']
+    labels = df_composicao['tipo_vacina'].tolist()
+    values = [int(v) for v in df_composicao['total'].tolist()]
+
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values, hole=0.68,
+        marker=dict(colors=colors[:len(labels)]),
+        textinfo='none', sort=False
+    ))
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=160, width=160,
+        dragmode=False,
+        annotations=[dict(
+            text=f'{format_number(total)}<br><span style="font-size:10px;color:#8B9A95">DOSES</span>',
+            showarrow=False, font=dict(size=18, color='#1F2937')
+        )]
+    )
+
+    legend_rows = []
+    for i, (label, value) in enumerate(zip(labels, values)):
+        pct = round(value / total * 100, 1) if total else 0
+        legend_rows.append(html.Div([
+            html.Span(className='sv2-legend-dot', style={'background': colors[i % len(colors)]}),
+            html.Span(label, className='sv2-legend-label'),
+            html.Span(f'{format_number(value)}  {pct}%', className='sv2-legend-value'),
+        ], className='sv2-legend-row'))
+
+    return html.Div([
+        html.Div([
+            html.Div('Composição das doses', className='sv2-card__eyebrow'),
+            html.Div('Vacinas aplicadas por tipo', className='sv2-card__title'),
+        ]),
+        html.Div([
+            dcc.Graph(figure=fig, config={'displayModeBar': False}, style={'flexShrink': 0}),
+            html.Div(legend_rows, className='sv2-legend-list'),
+        ], style={'display': 'flex', 'alignItems': 'center', 'gap': '20px', 'flexWrap': 'wrap'}),
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+
+
+def build_distribuicao_territorial_card(df_territorial, unidade_label='DOSES', titulo='Doses aplicadas por unidade'):
+    if df_territorial is None or df_territorial.empty:
+        body = html.Div('Sem dados para exibir', className='empty-state')
+    else:
+        df_sorted = df_territorial.sort_values('total', ascending=False).reset_index(drop=True)
+        total_geral = int(df_sorted['total'].sum())
+        top5 = df_sorted.head(5)
+        outros_total = int(df_sorted['total'][5:].sum())
+
+        rows = [(r.local_nome, int(r.total)) for r in top5.itertuples(index=False)]
+        if outros_total > 0:
+            rows.append(('Outros', outros_total))
+
+        row_divs = [html.Div([
+            html.Div('UNIDADE', className='sv2-territorial__head'),
+            html.Div(unidade_label, className='sv2-territorial__head sv2-territorial__head--num'),
+            html.Div('PART.', className='sv2-territorial__head sv2-territorial__head--num'),
+        ], className='sv2-territorial__row sv2-territorial__row--head')]
+
+        for nome, qtd in rows:
+            pct = round(qtd / total_geral * 100, 1) if total_geral else 0
+            row_divs.append(html.Div([
+                html.Div(nome, className='sv2-territorial__name'),
+                html.Div(format_number(qtd), className='sv2-territorial__num'),
+                html.Div(f'{pct}%', className='sv2-territorial__num'),
+            ], className='sv2-territorial__row'))
+
+        row_divs.append(html.Div([
+            html.Div('Total', className='sv2-territorial__name sv2-territorial__row--total'),
+            html.Div(format_number(total_geral), className='sv2-territorial__num sv2-territorial__row--total'),
+            html.Div('100%', className='sv2-territorial__num sv2-territorial__row--total'),
+        ], className='sv2-territorial__row'))
+
+        body = html.Div(row_divs, className='sv2-territorial-table')
+
+    return html.Div([
+        html.Div([
+            html.Div('Distribuição territorial', className='sv2-card__eyebrow'),
+            html.Div(titulo, className='sv2-card__title'),
+        ]),
+        body,
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+
+
+# ─── Tela de detalhe: Castração (réplica visual SEMMA) ─────────────────────
+# Mesma regra das telas anteriores: só usa categorias que existem de verdade.
+# "Desfechos" aqui bateu quase 100% com o design porque o sistema real já
+# rastreia status de nome igual (Aprovado/Reprovado/Desistente) — só
+# "Tutor ausente" vem de outra fonte (nao_compareceram) e "Em andamento"
+# junta Aguardando+Chamando. "Fluxo de atendimento" continua com as 2 etapas
+# reais (Recepção + Assinatura de Termo), não as 5 do mockup genérico —
+# já confirmado com o cliente na tela de panorama.
+def build_hero_castracao(date_start, date_end, quick_filter):
+    date_from = date_start or None
+    date_to = date_end or None
+    local_filter = LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None
+    weekend_only = quick_filter == 'weekend'
+
+    kpis_castra = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
+    totais = get_totais_acumulados()
+
+    def stat(label, value, sub):
+        return html.Div([
+            html.Div(label, className='sv2-hero__stat-label'),
+            html.Div(format_number(value), className='sv2-hero__stat-value'),
+            html.Div(sub, className='sv2-hero__stat-sub'),
+        ], className='sv2-hero__stat')
+
+    return html.Div([
+        html.Div([
+            html.Div(html.I(className='fa-solid fa-paw'), className='sv2-hero__icon-badge'),
+            html.Div([
+                html.Div('Castração', className='sv2-hero__title'),
+                html.Div('Da recepção à alta, com agenda e fila de espera', className='sv2-hero__subtitle'),
+            ]),
+        ], className='sv2-hero__title-row'),
+        html.Div([
+            stat('No período', kpis_castra['vagas_ocupadas'], 'castrações realizadas'),
+            stat('Acumulado', totais.get('Castração', 0), 'castrações no total'),
+        ], className='sv2-hero__stats'),
+    ], className='sv2-hero')
+
+
+def render_castracao_tab(date_start, date_end, quick_filter, local_filter=None, especie_id=None):
+    date_from = date_start or None
+    date_to = date_end or None
+    local_filter = local_filter or (LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None)
+    weekend_only = quick_filter == 'weekend'
+
+    kpis_castra = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
+    if especie_id:
+        # Espécie entra só nas "Agendadas"/"Vagas livres"/"Comparecimento" (os
+        # KPIs principais) — Desfechos/Fluxo/Distribuição territorial continuam
+        # olhando para todas as espécies juntas por enquanto.
+        kpis_castra = apply_especie_override(
+            kpis_castra, date_from, date_to, local_filter, 'Castração', weekend_only, especie_id
+        )
+    df_fluxo = get_fluxo_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
+    df_fluxo_historico = get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
+    df_departamentos = get_departamentos_configurados('Castração')
+    df_perfil = get_perfil_animais(date_from, date_to, local_filter, weekend_only, 'Castração')
+    df_territorial = get_distribuicao_territorial(date_from, date_to, local_filter, weekend_only, 'Castração')
+
+    total_checked_in = kpis_castra['vagas_checked_in']
+    total_scheduled = kpis_castra['vagas_scheduled']
+    comparecimento = round(total_checked_in / (total_checked_in + total_scheduled) * 100, 1) \
+        if (total_checked_in + total_scheduled) else 0
+
+    kpi_row = build_castracao_kpi_row(kpis_castra, comparecimento)
+    rest = html.Div([
+        html.Div([
+            build_desfechos_castracao_card(df_fluxo, kpis_castra['nao_compareceram']),
+            build_perfil_animais_card(df_perfil),
+        ], className='sv2-bottom-row'),
+        html.Div([
+            build_fluxo_funil_card(df_fluxo, df_fluxo_historico, df_departamentos),
+            build_distribuicao_territorial_card(
+                df_territorial, unidade_label='CASTRAÇÕES', titulo='Castrações por unidade'
+            ),
+        ], className='sv2-bottom-row'),
+    ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+    return kpi_row, rest
+
+
+def build_castracao_kpi_row(kpis_castra, comparecimento):
+    return html.Div([
+        sv2_kpi_card('fa-regular fa-calendar-check', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Agendadas', format_number(kpis_castra['vagas_scheduled'])),
+        sv2_kpi_card('fa-solid fa-door-open', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Vagas livres', format_number(kpis_castra['vagas_livres'])),
+        sv2_kpi_card('fa-regular fa-clock', '#FDEEF0', '#C1447E',
+                     'Em fila', format_number(kpis_castra['em_fila'])),
+        sv2_kpi_card('fa-solid fa-percent', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Comparecimento', f'{comparecimento}%'),
+    ], className='sv2-kpi-grid')
+
+
+def build_desfechos_castracao_card(df_fluxo, nao_compareceram):
+    valores = {'Concluído': 0, 'Em andamento': 0, 'Desistente': 0, 'Reprovado': 0}
+    if df_fluxo is not None and not df_fluxo.empty:
+        by_status = df_fluxo.groupby('status')['quantidade'].sum()
+        valores['Concluído'] = int(by_status.get('Aprovado', 0))
+        valores['Em andamento'] = int(by_status.get('Aguardando', 0)) + int(by_status.get('Chamando', 0)) \
+            + int(by_status.get('Em Atendimento', 0))
+        valores['Desistente'] = int(by_status.get('Desistente', 0))
+        valores['Reprovado'] = int(by_status.get('Reprovado', 0))
+    valores['Tutor ausente'] = int(nao_compareceram or 0)
+
+    total = sum(valores.values())
+
+    def pct(v):
+        return round(v / total * 100, 1) if total else 0
+
+    cores = {
+        'Concluído': '#1F9E4D', 'Em andamento': '#F5A623',
+        'Desistente': '#94A3B8', 'Reprovado': '#EF4444', 'Tutor ausente': '#CBD5E1',
+    }
+    rows = [build_bar_row(cores[label], label, valor, pct(valor)) for label, valor in valores.items()]
+
+    return html.Div([
+        html.Div([
+            html.Div('Desfechos', className='sv2-card__eyebrow'),
+            html.Div('Resultado dos atendimentos', className='sv2-card__title'),
+        ]),
+        html.Div(rows, className='sv2-bar-row-list'),
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+
+
+def build_fluxo_funil_card(df_fluxo, df_fluxo_historico, df_departamentos):
+    # O número principal de cada etapa vem do HISTÓRICO de movimentação
+    # (log_call_queue_department), não do snapshot atual da fila: sk_call_queue
+    # só guarda o status ATUAL de cada item, então uma etapa "de passagem" (ex:
+    # Recepção, antes de avançar para Assinatura de Termo) apareceria zerada ali
+    # mesmo com movimento real. Usamos o maior valor entre os status de cada
+    # departamento no histórico — o primeiro status ao entrar é sempre o pico.
+    quantidades = {}
+    if df_fluxo_historico is not None and not df_fluxo_historico.empty:
+        agg_hist = df_fluxo_historico.groupby('departamento')['quantidade'].max()
+        for nome, qtd in agg_hist.items():
+            quantidades[nome] = int(qtd)
+
+    # "Aguardando" é o único número que faz sentido tirar do snapshot ATUAL
+    # (quem está esperando agora, nesse instante) — não do histórico.
+    aguardando = {}
+    if df_fluxo is not None and not df_fluxo.empty:
+        agg_wait = df_fluxo.groupby('departamento')['qtd_waiting'].sum()
+        for nome, qtd in agg_wait.items():
+            aguardando[nome] = int(qtd)
+
+    if df_departamentos is not None and not df_departamentos.empty:
+        rows = df_departamentos.sort_values('ordem_fluxo').itertuples(index=False)
+        steps = [(r.departamento, quantidades.get(r.departamento, 0), aguardando.get(r.departamento, 0))
+                 for r in rows]
+    else:
+        steps = []
+
+    if not steps:
+        body = html.Div('Sem dados para exibir', className='empty-state')
+    else:
+        step_divs = []
+        for i, (nome, qtd, esperando) in enumerate(steps, start=1):
+            step_divs.append(html.Div([
+                html.Div(format_number(qtd), className='sv2-funnel-flow__circle'),
+                html.Div(nome, className='sv2-funnel-flow__label'),
+                html.Div(f'↓ {format_number(esperando)} aguardando', className='sv2-funnel-flow__sub'),
+            ], className='sv2-funnel-flow__step'))
+        body = html.Div(step_divs, className='sv2-funnel-flow')
+
+    return html.Div([
+        html.Div([
+            html.Div('Fluxo de atendimento', className='sv2-card__eyebrow'),
+            html.Div('Etapas da castração', className='sv2-card__title'),
+        ]),
+        html.Div('Quantos animais já passaram por cada etapa no período', className='sv2-card__desc'),
+        body,
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '20px'})
 
 
 # ─── Tab: Departamentos ─────────────────────────────────────────────────────
