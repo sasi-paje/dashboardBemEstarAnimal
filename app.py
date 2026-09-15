@@ -2,6 +2,7 @@ import dash
 from dash import dcc, html, callback, ctx, Input, Output, State
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from concurrent.futures import ThreadPoolExecutor
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -47,6 +48,23 @@ MESES_PT = {
     '01': 'Jan', '02': 'Fev', '03': 'Mar', '04': 'Abr', '05': 'Mai', '06': 'Jun',
     '07': 'Jul', '08': 'Ago', '09': 'Set', '10': 'Out', '11': 'Nov', '12': 'Dez'
 }
+
+# ─── Paralelização de consultas ao banco ───────────────────────────────────
+# Cada get_* do db.py abre sua PRÓPRIA conexão (execute_query_dataframe_simple)
+# e o servidor real fica na Supabase (rede) — o tempo de resposta de cada tela
+# é dominado por ESPERA de rede, não por CPU. Hoje essas consultas rodavam
+# todas em série (uma espera atrás da outra), o que soma ~10 consultas x
+# algumas centenas de ms cada = os 8-10s relatados ao abrir Vacinação/Castração.
+# Rodando em threads, o tempo total passa a ser ~o da consulta mais lenta do
+# grupo, não a soma — sem mudar nenhuma query nem o resultado de nenhuma.
+_db_executor = ThreadPoolExecutor(max_workers=12)
+
+
+def parallel(*fns):
+    """Executa callables (sem argumento, ex: lambdas) em paralelo e devolve os
+    resultados na mesma ordem em que foram passados."""
+    futures = [_db_executor.submit(fn) for fn in fns]
+    return [f.result() for f in futures]
 
 app = dash.Dash(
     __name__,
@@ -412,29 +430,59 @@ def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_
     servico_filter = adv_servico if adv_servico and adv_servico != 'todos' else None
     especie_id = int(adv_especie) if adv_especie and adv_especie != 'todas' else None
 
-    # "Portas de entrada" é renderizada SEMPRE (mesmo fora do panorama) —
-    # é onde vive o botão que abre a tela de Vacinação. Só fica invisível
-    # via 'style' quando não estamos no panorama.
-    kpis_vacina_entry = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
-    kpis_castra_entry = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
-    especies_entry = get_especies_vacinacao(date_from, date_to, local_filter, weekend_only)
-    entry_section = build_entry_section(kpis_vacina_entry, especies_entry, kpis_castra_entry)
+    # "Portas de entrada" só fica VISÍVEL no panorama — nas outras telas
+    # mantém o último conteúdo já renderizado (dash.no_update) e só some via
+    # 'style', sem gastar tempo de rede à toa.
     entry_style = {} if view_mode == 'panorama' else {'display': 'none'}
 
     if view_mode == 'vacinacao':
-        hero = build_hero_vacinacao(date_start, date_end, quick_filter)
-        kpi_row, rest_content = render_vacinacao_tab(date_start, date_end, quick_filter, local_filter, especie_id)
+        entry_section = dash.no_update
+        kpis_vacina, totais = parallel(
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only),
+            lambda: get_totais_acumulados(),
+        )
+        hero = build_hero_vacinacao(kpis_vacina, totais)
+        kpi_row, rest_content = render_vacinacao_tab(
+            date_start, date_end, quick_filter, local_filter, especie_id, kpis_vacina_base=kpis_vacina
+        )
         warning_style = {'display': 'none'}
         back_link_style = {}
     elif view_mode == 'castracao':
-        hero = build_hero_castracao(date_start, date_end, quick_filter)
-        kpi_row, rest_content = render_castracao_tab(date_start, date_end, quick_filter, local_filter, especie_id)
+        entry_section = dash.no_update
+        kpis_castra, totais = parallel(
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only),
+            lambda: get_totais_acumulados(),
+        )
+        hero = build_hero_castracao(kpis_castra, totais)
+        kpi_row, rest_content = render_castracao_tab(
+            date_start, date_end, quick_filter, local_filter, especie_id, kpis_castra_base=kpis_castra
+        )
         warning_style = {'display': 'none'}
         back_link_style = {}
     else:
-        hero = build_hero(get_totais_acumulados())
+        # No panorama, "Portas de entrada" + hero + aba usam bases que se
+        # sobrepõem (ex: KPI de Vacinação entra tanto no card de entrada
+        # quanto no card do topo) — TUDO é buscado numa ÚNICA leva em
+        # paralelo (8 consultas de uma vez) em vez de 3 ondas sequenciais.
+        # Isso é o que fazia "Voltar ao panorama" demorar mais que abrir
+        # Vacinação/Castração: as mesmas consultas, só que em série.
+        (kpis_vacina, kpis_castra, kpis_all, especies_entry, totais,
+         df_mes, df_fluxo_historico, df_departamentos) = parallel(
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only),
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only),
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, servico_filter, weekend_only),
+            lambda: get_especies_vacinacao(date_from, date_to, local_filter, weekend_only),
+            lambda: get_totais_acumulados(),
+            lambda: get_atendimentos_por_mes(date_from, date_to, local_filter, weekend_only),
+            lambda: get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only),
+            lambda: get_departamentos_configurados('Castração'),
+        )
+        entry_section = build_entry_section(kpis_vacina, especies_entry, kpis_castra)
+        hero = build_hero(totais)
         kpi_row, rest_content = render_dashboard_tab(
-            date_start, date_end, quick_filter, local_filter, servico_filter, especie_id
+            date_start, date_end, quick_filter, local_filter, servico_filter, especie_id,
+            kpis_all_base=kpis_all, kpis_vacina_base=kpis_vacina, kpis_castra_base=kpis_castra,
+            df_mes=df_mes, df_fluxo_historico=df_fluxo_historico, df_departamentos=df_departamentos,
         )
         show_legacy_warning = date_start is None or date_start < DATA_CORTE_LEGADO
         warning_style = {} if show_legacy_warning else {'display': 'none'}
@@ -477,23 +525,41 @@ def apply_especie_override(kpis_base, date_from, date_to, local, servico, weeken
     return merged
 
 
-def render_dashboard_tab(date_start, date_end, quick_filter, local_filter=None, servico_filter=None, especie_id=None):
+def render_dashboard_tab(date_start, date_end, quick_filter, local_filter=None, servico_filter=None, especie_id=None,
+                          kpis_all_base=None, kpis_vacina_base=None, kpis_castra_base=None,
+                          df_mes=None, df_fluxo_historico=None, df_departamentos=None):
     date_from = date_start or None
     date_to = date_end or None
     weekend_only = quick_filter == 'weekend'
 
-    kpis_all = get_kpis_fact_resumo(date_from, date_to, local_filter, servico_filter, weekend_only)
-    kpis_vacina = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
-    kpis_castra = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
+    # *_base são opcionais: quando render_dashboard já buscou esses mesmos
+    # dados (numa leva maior, em paralelo com "Portas de entrada"/hero),
+    # reaproveita em vez de repetir a consulta — só busca aqui se ninguém
+    # passou nada pronto.
+    if kpis_all_base is not None and kpis_vacina_base is not None and kpis_castra_base is not None:
+        kpis_all, kpis_vacina, kpis_castra = kpis_all_base, kpis_vacina_base, kpis_castra_base
+    else:
+        # As 3 consultas de KPI são independentes entre si (serviços diferentes) —
+        # rodam em paralelo em vez de em série.
+        kpis_all, kpis_vacina, kpis_castra = parallel(
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, servico_filter, weekend_only),
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only),
+            lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only),
+        )
 
     if especie_id:
-        kpis_all = apply_especie_override(kpis_all, date_from, date_to, local_filter, servico_filter, weekend_only, especie_id)
-        kpis_vacina = apply_especie_override(kpis_vacina, date_from, date_to, local_filter, 'Vacinação', weekend_only, especie_id)
-        kpis_castra = apply_especie_override(kpis_castra, date_from, date_to, local_filter, 'Castração', weekend_only, especie_id)
+        kpis_all, kpis_vacina, kpis_castra = parallel(
+            lambda: apply_especie_override(kpis_all, date_from, date_to, local_filter, servico_filter, weekend_only, especie_id),
+            lambda: apply_especie_override(kpis_vacina, date_from, date_to, local_filter, 'Vacinação', weekend_only, especie_id),
+            lambda: apply_especie_override(kpis_castra, date_from, date_to, local_filter, 'Castração', weekend_only, especie_id),
+        )
 
-    df_mes = get_atendimentos_por_mes(date_from, date_to, local_filter, weekend_only)
-    df_fluxo_historico = get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
-    df_departamentos = get_departamentos_configurados('Castração')
+    if df_mes is None or df_fluxo_historico is None or df_departamentos is None:
+        df_mes, df_fluxo_historico, df_departamentos = parallel(
+            lambda: get_atendimentos_por_mes(date_from, date_to, local_filter, weekend_only),
+            lambda: get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only),
+            lambda: get_departamentos_configurados('Castração'),
+        )
 
     # "Portas de entrada" (build_entry_section) NÃO entra aqui — é renderizada
     # à parte pelo callback principal, num container sempre presente no DOM
@@ -799,15 +865,10 @@ def build_flow_card(df_fluxo, df_departamentos=None):
 # a tela mostra só o que é real (ver conversa/decisão registrada com o
 # cliente): Desfechos = Compareceu/Agendado; Composição das doses aparece
 # mesmo com 1 categoria só; Distribuição territorial = Top 5 + "Outros".
-def build_hero_vacinacao(date_start, date_end, quick_filter):
-    date_from = date_start or None
-    date_to = date_end or None
-    local_filter = LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None
-    weekend_only = quick_filter == 'weekend'
-
-    kpis_vacina = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
-    totais = get_totais_acumulados()
-
+def build_hero_vacinacao(kpis_vacina, totais):
+    # kpis_vacina/totais já vêm calculados de render_dashboard (em paralelo com
+    # o restante da tela) — evita repetir a mesma consulta que render_vacinacao_tab
+    # já faz logo em seguida.
     def stat(label, value, sub):
         return html.Div([
             html.Div(label, className='sv2-hero__stat-label'),
@@ -830,13 +891,17 @@ def build_hero_vacinacao(date_start, date_end, quick_filter):
     ], className='sv2-hero')
 
 
-def render_vacinacao_tab(date_start, date_end, quick_filter, local_filter=None, especie_id=None):
+def render_vacinacao_tab(date_start, date_end, quick_filter, local_filter=None, especie_id=None, kpis_vacina_base=None):
     date_from = date_start or None
     date_to = date_end or None
     local_filter = local_filter or (LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None)
     weekend_only = quick_filter == 'weekend'
 
-    kpis_vacina = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
+    # kpis_vacina_base é opcional: quando render_dashboard já calculou esse
+    # mesmo KPI (pro hero, em paralelo), reaproveita em vez de repetir a
+    # consulta — só recalcula aqui se ninguém passou nada pronto.
+    kpis_vacina = kpis_vacina_base if kpis_vacina_base is not None else \
+        get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only)
     if especie_id:
         # Espécie entra só nas "Doses aplicadas" (o KPI principal) — Locais
         # atendidos/Desfechos/Composição/Distribuição territorial continuam
@@ -844,11 +909,14 @@ def render_vacinacao_tab(date_start, date_end, quick_filter, local_filter=None, 
         kpis_vacina = apply_especie_override(
             kpis_vacina, date_from, date_to, local_filter, 'Vacinação', weekend_only, especie_id
         )
-    locais_atendidos = get_locais_atendidos(date_from, date_to, local_filter, weekend_only, 'Vacinação')
-    desfechos = get_desfechos_agendamento(date_from, date_to, local_filter, weekend_only, 'Vacinação')
-    df_perfil = get_perfil_animais(date_from, date_to, local_filter, weekend_only, 'Vacinação')
-    df_composicao = get_composicao_doses(date_from, date_to, local_filter, weekend_only)
-    df_territorial = get_distribuicao_territorial(date_from, date_to, local_filter, weekend_only, 'Vacinação')
+    # As 5 consultas abaixo são independentes entre si — rodam em paralelo.
+    locais_atendidos, desfechos, df_perfil, df_composicao, df_territorial = parallel(
+        lambda: get_locais_atendidos(date_from, date_to, local_filter, weekend_only, 'Vacinação'),
+        lambda: get_desfechos_agendamento(date_from, date_to, local_filter, weekend_only, 'Vacinação'),
+        lambda: get_perfil_animais(date_from, date_to, local_filter, weekend_only, 'Vacinação'),
+        lambda: get_composicao_doses(date_from, date_to, local_filter, weekend_only),
+        lambda: get_distribuicao_territorial(date_from, date_to, local_filter, weekend_only, 'Vacinação'),
+    )
 
     doses_aplicadas = kpis_vacina['vagas_ocupadas']
     media_por_posto = round(doses_aplicadas / locais_atendidos) if locais_atendidos else 0
@@ -1056,15 +1124,10 @@ def build_distribuicao_territorial_card(df_territorial, unidade_label='DOSES', t
 # junta Aguardando+Chamando. "Fluxo de atendimento" continua com as 2 etapas
 # reais (Recepção + Assinatura de Termo), não as 5 do mockup genérico —
 # já confirmado com o cliente na tela de panorama.
-def build_hero_castracao(date_start, date_end, quick_filter):
-    date_from = date_start or None
-    date_to = date_end or None
-    local_filter = LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None
-    weekend_only = quick_filter == 'weekend'
-
-    kpis_castra = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
-    totais = get_totais_acumulados()
-
+def build_hero_castracao(kpis_castra, totais):
+    # kpis_castra/totais já vêm calculados de render_dashboard (em paralelo com
+    # o restante da tela) — evita repetir a mesma consulta que render_castracao_tab
+    # já faz logo em seguida.
     def stat(label, value, sub):
         return html.Div([
             html.Div(label, className='sv2-hero__stat-label'),
@@ -1087,13 +1150,17 @@ def build_hero_castracao(date_start, date_end, quick_filter):
     ], className='sv2-hero')
 
 
-def render_castracao_tab(date_start, date_end, quick_filter, local_filter=None, especie_id=None):
+def render_castracao_tab(date_start, date_end, quick_filter, local_filter=None, especie_id=None, kpis_castra_base=None):
     date_from = date_start or None
     date_to = date_end or None
     local_filter = local_filter or (LOCAL_CENTRO_ZOONOSES if quick_filter == 'zoonoses' else None)
     weekend_only = quick_filter == 'weekend'
 
-    kpis_castra = get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
+    # kpis_castra_base é opcional: quando render_dashboard já calculou esse
+    # mesmo KPI (pro hero, em paralelo), reaproveita em vez de repetir a
+    # consulta — só recalcula aqui se ninguém passou nada pronto.
+    kpis_castra = kpis_castra_base if kpis_castra_base is not None else \
+        get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only)
     if especie_id:
         # Espécie entra só nas "Agendadas"/"Vagas livres"/"Comparecimento" (os
         # KPIs principais) — Desfechos/Fluxo/Distribuição territorial continuam
@@ -1101,11 +1168,14 @@ def render_castracao_tab(date_start, date_end, quick_filter, local_filter=None, 
         kpis_castra = apply_especie_override(
             kpis_castra, date_from, date_to, local_filter, 'Castração', weekend_only, especie_id
         )
-    df_fluxo = get_fluxo_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
-    df_fluxo_historico = get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only)
-    df_departamentos = get_departamentos_configurados('Castração')
-    df_perfil = get_perfil_animais(date_from, date_to, local_filter, weekend_only, 'Castração')
-    df_territorial = get_distribuicao_territorial(date_from, date_to, local_filter, weekend_only, 'Castração')
+    # As 4 consultas abaixo são independentes entre si — rodam em paralelo.
+    df_fluxo, df_fluxo_historico, df_departamentos, df_perfil, df_territorial = parallel(
+        lambda: get_fluxo_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only),
+        lambda: get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only),
+        lambda: get_departamentos_configurados('Castração'),
+        lambda: get_perfil_animais(date_from, date_to, local_filter, weekend_only, 'Castração'),
+        lambda: get_distribuicao_territorial(date_from, date_to, local_filter, weekend_only, 'Castração'),
+    )
 
     total_checked_in = kpis_castra['vagas_checked_in']
     total_scheduled = kpis_castra['vagas_scheduled']
