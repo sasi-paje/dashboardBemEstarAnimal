@@ -882,6 +882,21 @@ body {
 .sv2-date-field .SingleDatePickerInput,
 .sv2-date-field .DateInput {
   border-radius: 8px !important;
+  border: none !important;
+  background: transparent !important;
+  width: 150px !important;
+}
+
+/* O DatePicker do Dash embrulha o <input> num div própria com borda (a
+   caixa "dupla" que sobra por trás da nossa borda no input) — some com a
+   borda do wrapper e deixa só a do input, que já tem o visual que queremos. */
+.sv2-date-field .dash-datepicker-input-wrapper {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.sv2-date-field .dash-datepicker {
+  border: none !important;
   width: 150px !important;
 }
 
@@ -1084,10 +1099,11 @@ body {
 /* ── Portas de entrada ───────────────────────────────────── */
 .sv2-entry-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 
+@media (max-width: 1200px) { .sv2-entry-row { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 900px) { .sv2-entry-row { grid-template-columns: 1fr; } }
 
 .sv2-entry-card {

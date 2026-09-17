@@ -1256,3 +1256,116 @@ def get_kpis_por_especie(date_from=None, date_to=None, local=None, servico=None,
         'vagas_checked_in': int(df.iloc[0]['vagas_checked_in']),
         'em_fila': em_fila,
     }
+
+
+# ─── Histórico (registros passados, fora do sistema) ───────────────────────
+# bea_external_records reúne 3 origens importadas de fora do sistema
+# (Castramóvel, Clínica PetGold, Programa Bem-Estar Animal) — todas só com
+# atendimentos de castração, sem vacinação nem microchip registrados aqui.
+# Por isso "vacinados" e "com microchip" só existem cruzando o CPF do tutor
+# com o cadastro do sistema (person/pet/trx_vaccine_application).
+def _historico_date_filter(date_from, date_to, weekend_only, params):
+    """Mesmo padrão de filtro de data/fim-de-semana usado no resto do db.py,
+    aplicado em cima de service_date (única data real dessa tabela)."""
+    clause = ""
+    if date_from:
+        clause += " AND service_date >= %s"
+        params.append(date_from)
+    if date_to:
+        clause += " AND service_date <= %s"
+        params.append(date_to)
+    if weekend_only:
+        clause += " AND EXTRACT(DOW FROM service_date) IN (0, 6)"
+    return clause
+
+
+def get_historico_resumo(date_from=None, date_to=None, weekend_only=False):
+    """Contagem rápida (só na própria tabela, sem cruzamento) para o card de
+    entrada do panorama — não paga o custo do cruzamento com o sistema."""
+    params = []
+    query = """
+    SELECT
+        COUNT(*) AS total_registros,
+        COUNT(DISTINCT cpf) AS total_tutores,
+        COUNT(DISTINCT (cpf, pet_name)) AS total_pets
+    FROM bea_external_records
+    WHERE 1=1
+    """
+    query += _historico_date_filter(date_from, date_to, weekend_only, params)
+    try:
+        df = execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_historico_resumo, falling back to pool: {e}")
+        df = execute_query_dataframe(query, tuple(params) if params else None)
+
+    if df.empty:
+        return {'total_registros': 0, 'total_tutores': 0, 'total_pets': 0}
+    row = df.iloc[0]
+    return {
+        'total_registros': int(row['total_registros']),
+        'total_tutores': int(row['total_tutores']),
+        'total_pets': int(row['total_pets']),
+    }
+
+
+def get_historico_tutores(date_from=None, date_to=None, weekend_only=False):
+    """Uma linha por tutor (CPF) do histórico (Castramóvel + Clínica PetGold +
+    Programa Bem-Estar Animal), com a quantidade de pets/castrações levados
+    e, para quem já existe cadastrado no sistema (cruzamento por CPF),
+    quantos desses pets têm vacinação aplicada e quantos têm microchip."""
+    params = []
+    date_filter = _historico_date_filter(date_from, date_to, weekend_only, params)
+    query = f"""
+    WITH historico AS (
+        SELECT
+            regexp_replace(cpf, '\\D', '', 'g') AS cpf_clean,
+            cpf, owner_name, phone, address, pet_name
+        FROM bea_external_records
+        WHERE 1=1 {date_filter}
+    ),
+    tutores AS (
+        SELECT
+            cpf_clean,
+            MIN(cpf) AS cpf,
+            MIN(owner_name) AS tutor,
+            MIN(phone) AS telefone,
+            MIN(address) AS endereco,
+            COUNT(DISTINCT pet_name) AS qtd_pets,
+            COUNT(*) AS qtd_castracoes
+        FROM historico
+        GROUP BY cpf_clean
+    ),
+    match_person AS (
+        SELECT DISTINCT ON (regexp_replace(cpf, '\\D', '', 'g'))
+            regexp_replace(cpf, '\\D', '', 'g') AS cpf_clean,
+            person_id
+        FROM person
+        WHERE cpf IS NOT NULL
+    ),
+    agg_pets AS (
+        SELECT
+            mp.cpf_clean,
+            COUNT(DISTINCT pt.id) FILTER (
+                WHERE pt.chip_code IS NOT NULL AND btrim(pt.chip_code) <> ''
+            ) AS pets_com_chip,
+            COUNT(DISTINCT v.pet_id) AS pets_vacinados
+        FROM match_person mp
+        JOIN pet pt ON pt.tutor_id = mp.person_id
+        LEFT JOIN trx_vaccine_application v ON v.pet_id = pt.id
+        GROUP BY mp.cpf_clean
+    )
+    SELECT
+        t.cpf, t.tutor, t.telefone, t.endereco, t.qtd_pets, t.qtd_castracoes,
+        (mp.cpf_clean IS NOT NULL) AS cadastrado_sistema,
+        COALESCE(ap.pets_vacinados, 0) AS pets_vacinados,
+        COALESCE(ap.pets_com_chip, 0) AS pets_com_chip
+    FROM tutores t
+    LEFT JOIN match_person mp ON mp.cpf_clean = t.cpf_clean
+    LEFT JOIN agg_pets ap ON ap.cpf_clean = t.cpf_clean
+    ORDER BY t.tutor
+    """
+    try:
+        return execute_query_dataframe_simple(query, tuple(params) if params else None)
+    except Exception as e:
+        print(f"Error in get_historico_tutores, falling back to pool: {e}")
+        return execute_query_dataframe(query, tuple(params) if params else None)

@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, callback, ctx, Input, Output, State
+from dash import dcc, html, callback, ctx, Input, Output, State, dash_table
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +25,8 @@ from db import (
     get_composicao_doses,
     get_distribuicao_territorial,
     get_kpis_por_especie,
+    get_historico_resumo,
+    get_historico_tutores,
 )
 
 LOCAL_CENTRO_ZOONOSES = 'Unidade de Vigilância e Controle de Zoonoses-UVCZ'
@@ -323,7 +325,7 @@ app.layout = html.Div([
                 DASHBOARD_FILTER_PANEL,
             ], className='sv2-hero-filter-card'),
             ADV_FILTER_PANEL,
-        ], className='sv2-hero-filter-anchor'),
+        ], id='hero-filter-anchor', className='sv2-hero-filter-anchor'),
         LEGACY_WARNING_BANNER,
         html.Div(id='kpi-row-container'),
         # "Portas de entrada" precisa existir SEMPRE no DOM — o botão que
@@ -353,14 +355,17 @@ app.layout = html.Div([
     Output('view-mode', 'data'),
     [Input('btn-abrir-vacinacao', 'n_clicks'),
      Input('btn-abrir-castracao', 'n_clicks'),
+     Input('btn-abrir-historico', 'n_clicks'),
      Input('btn-voltar-panorama', 'n_clicks')],
     prevent_initial_call=True
 )
-def toggle_view_mode(n_abrir_vacinacao, n_abrir_castracao, n_voltar):
+def toggle_view_mode(n_abrir_vacinacao, n_abrir_castracao, n_abrir_historico, n_voltar):
     if ctx.triggered_id == 'btn-abrir-vacinacao':
         return 'vacinacao'
     if ctx.triggered_id == 'btn-abrir-castracao':
         return 'castracao'
+    if ctx.triggered_id == 'btn-abrir-historico':
+        return 'historico'
     return 'panorama'
 
 
@@ -385,6 +390,7 @@ def toggle_adv_filter_panel(n_clicks):
      Output('dashboard-content', 'children'),
      Output('legacy-warning-banner', 'style'),
      Output('btn-voltar-panorama', 'style'),
+     Output('hero-filter-anchor', 'style'),
      Output('dash-date-start', 'date'),
      Output('dash-date-end', 'date'),
      Output('dash-quick-filter', 'value')],
@@ -447,6 +453,7 @@ def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_
         )
         warning_style = {'display': 'none'}
         back_link_style = {}
+        hero_filter_style = {}
     elif view_mode == 'castracao':
         entry_section = dash.no_update
         kpis_castra, totais = parallel(
@@ -459,6 +466,21 @@ def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_
         )
         warning_style = {'display': 'none'}
         back_link_style = {}
+        hero_filter_style = {}
+    elif view_mode == 'historico':
+        # Base de registros passados do Programa Bem-Estar Animal — usa o
+        # mesmo painel de Data inicial/final/Fim de semana do topo (aplicado
+        # em cima de service_date). "Centro de Zoonoses" não existe nessa
+        # base (é sempre o mesmo local externo), então local_filter não é
+        # usado aqui.
+        entry_section = dash.no_update
+        df_tutores = get_historico_tutores(date_from, date_to, weekend_only)
+        kpis_historico = build_kpis_historico(df_tutores)
+        hero = build_hero_historico(kpis_historico)
+        kpi_row, rest_content = render_historico_tab(df_tutores, kpis_historico)
+        warning_style = {'display': 'none'}
+        back_link_style = {}
+        hero_filter_style = {}
     else:
         # No panorama, "Portas de entrada" + hero + aba usam bases que se
         # sobrepõem (ex: KPI de Vacinação entra tanto no card de entrada
@@ -467,7 +489,7 @@ def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_
         # Isso é o que fazia "Voltar ao panorama" demorar mais que abrir
         # Vacinação/Castração: as mesmas consultas, só que em série.
         (kpis_vacina, kpis_castra, kpis_all, especies_entry, totais,
-         df_mes, df_fluxo_historico, df_departamentos) = parallel(
+         df_mes, df_fluxo_historico, df_departamentos, resumo_historico) = parallel(
             lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Vacinação', weekend_only),
             lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, 'Castração', weekend_only),
             lambda: get_kpis_fact_resumo(date_from, date_to, local_filter, servico_filter, weekend_only),
@@ -476,8 +498,9 @@ def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_
             lambda: get_atendimentos_por_mes(date_from, date_to, local_filter, weekend_only),
             lambda: get_fluxo_historico_departamentos(date_from, date_to, local_filter, 'Castração', weekend_only),
             lambda: get_departamentos_configurados('Castração'),
+            lambda: get_historico_resumo(date_from, date_to, weekend_only),
         )
-        entry_section = build_entry_section(kpis_vacina, especies_entry, kpis_castra)
+        entry_section = build_entry_section(kpis_vacina, especies_entry, kpis_castra, resumo_historico)
         hero = build_hero(totais)
         kpi_row, rest_content = render_dashboard_tab(
             date_start, date_end, quick_filter, local_filter, servico_filter, especie_id,
@@ -487,8 +510,9 @@ def render_dashboard(date_start, date_end, quick_filter, n_filtrar, n_limpar, n_
         show_legacy_warning = date_start is None or date_start < DATA_CORTE_LEGADO
         warning_style = {} if show_legacy_warning else {'display': 'none'}
         back_link_style = {'display': 'none'}
+        hero_filter_style = {}
 
-    base = (hero, kpi_row, entry_section, entry_style, rest_content, warning_style, back_link_style)
+    base = (hero, kpi_row, entry_section, entry_style, rest_content, warning_style, back_link_style, hero_filter_style)
 
     if ctx.triggered_id == 'dash-btn-limpar':
         return base + (date_start, date_end, quick_filter)
@@ -666,7 +690,7 @@ def sv2_entry_card(icon_class, badge_text, title, desc, stats, expand_id=None):
     ], className='sv2-entry-card', **card_kwargs)
 
 
-def build_entry_section(kpis_vacina, especies, kpis_castra):
+def build_entry_section(kpis_vacina, especies, kpis_castra, resumo_historico=None):
     vacina_card = sv2_entry_card(
         'fa-solid fa-syringe',
         f"{format_number(kpis_vacina['vagas_ocupadas'])} aplicadas",
@@ -691,6 +715,19 @@ def build_entry_section(kpis_vacina, especies, kpis_castra):
         ],
         expand_id='btn-abrir-castracao'
     )
+    resumo_historico = resumo_historico or {'total_registros': 0, 'total_tutores': 0, 'total_pets': 0}
+    historico_card = sv2_entry_card(
+        'fa-solid fa-people-group',
+        f"{format_number(resumo_historico['total_tutores'])} tutores",
+        'Histórico',
+        'Base de registros passados importados de fora do sistema (Castramóvel, Clínica PetGold e Programa Bem-Estar Animal): tutores, pets e castrações.',
+        [
+            ('Tutores (CPFs)', resumo_historico['total_tutores']),
+            ('Pets atendidos', resumo_historico['total_pets']),
+            ('Castrações', resumo_historico['total_registros']),
+        ],
+        expand_id='btn-abrir-historico'
+    )
     return html.Div([
         html.Div([
             html.Div([
@@ -699,7 +736,7 @@ def build_entry_section(kpis_vacina, especies, kpis_castra):
             ]),
             html.Div('Clique para abrir os dados específicos', className='sv2-entry-hint'),
         ], className='sv2-card__header-row'),
-        html.Div([vacina_card, castracao_card], className='sv2-entry-row'),
+        html.Div([vacina_card, castracao_card, historico_card], className='sv2-entry-row'),
     ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '12px'})
 
 
@@ -1290,6 +1327,153 @@ def build_fluxo_funil_card(df_fluxo, df_fluxo_historico, df_departamentos):
         html.Div('Quantos animais já passaram por cada etapa no período', className='sv2-card__desc'),
         body,
     ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '20px'})
+
+
+# ─── Tela de detalhe: Histórico (Castramóvel + Clínica PetGold + Programa
+#     Bem-Estar Animal) ───────────────────────────────────────────────────
+# Diferente de Vacinação/Castração, essa tela usa o filtro de data do topo
+# aplicado em cima de service_date, mas não o local/espécie — é a base de
+# registros passados (histórico importado de fora do sistema), não o fluxo
+# de agendamento do dia a dia. "Vacinados"/"com microchip" só existem para os
+# tutores que também têm CPF cadastrado no sistema atual (ver comentário em
+# db.get_historico_tutores); os demais aparecem como "cadastrado_sistema" = Não.
+def build_kpis_historico(df):
+    if df is None or df.empty:
+        return {
+            'total_tutores': 0, 'total_pets': 0, 'total_castracoes': 0,
+            'tutores_cadastrados': 0, 'pets_vacinados': 0, 'pets_com_chip': 0,
+        }
+    return {
+        'total_tutores': len(df),
+        'total_pets': int(df['qtd_pets'].sum()),
+        'total_castracoes': int(df['qtd_castracoes'].sum()),
+        'tutores_cadastrados': int(df['cadastrado_sistema'].sum()),
+        'pets_vacinados': int(df['pets_vacinados'].sum()),
+        'pets_com_chip': int(df['pets_com_chip'].sum()),
+    }
+
+
+def build_hero_historico(kpis):
+    def stat(label, value, sub):
+        return html.Div([
+            html.Div([html.Span(label)], className='sv2-hero__stat-label'),
+            html.Div(format_number(value), className='sv2-hero__stat-value'),
+            html.Div(sub, className='sv2-hero__stat-sub'),
+        ], className='sv2-hero__stat')
+
+    return html.Div([
+        html.Div([
+            html.Div(html.I(className='fa-solid fa-people-group'), className='sv2-hero__icon-badge'),
+            html.Div([
+                html.Div('Histórico', className='sv2-hero__title'),
+                html.Div(
+                    'Base de registros passados importados de fora do sistema',
+                    className='sv2-hero__subtitle'
+                ),
+            ]),
+        ], className='sv2-hero__title-row'),
+        html.Div([
+            stat('Tutores (CPFs)', kpis['total_tutores'], 'únicos na base'),
+            stat('Pets atendidos', kpis['total_pets'], 'registrados'),
+        ], className='sv2-hero__stats'),
+    ], className='sv2-hero')
+
+
+def build_historico_kpi_row(kpis):
+    return html.Div([
+        sv2_kpi_card('fa-solid fa-users', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Tutores (CPFs)', format_number(kpis['total_tutores'])),
+        sv2_kpi_card('fa-solid fa-paw', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Pets atendidos', format_number(kpis['total_pets'])),
+        sv2_kpi_card('fa-solid fa-scissors', '#E7F2EA', 'var(--sv2-green-700)',
+                     'Castrações realizadas', format_number(kpis['total_castracoes'])),
+        sv2_kpi_card('fa-solid fa-id-card', '#EAF0FB', '#1c2c51',
+                     'Tutores cadastrados no sistema', format_number(kpis['tutores_cadastrados'])),
+        sv2_kpi_card('fa-solid fa-syringe', '#FDEEF0', '#C1447E',
+                     'Pets vacinados (dos cadastrados)', format_number(kpis['pets_vacinados'])),
+        sv2_kpi_card('fa-solid fa-microchip', '#FDEEF0', '#C1447E',
+                     'Pets com microchip (dos cadastrados)', format_number(kpis['pets_com_chip'])),
+    ], className='sv2-kpi-grid')
+
+
+def format_cpf(cpf):
+    digits = ''.join(c for c in str(cpf) if c.isdigit())
+    if len(digits) != 11:
+        return cpf
+    return f'{digits[0:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:11]}'
+
+
+def build_historico_table(df):
+    if df is None or df.empty:
+        return html.Div('Sem dados para exibir', className='empty-state')
+
+    df_display = df.copy()
+    df_display['cpf'] = df_display['cpf'].apply(format_cpf)
+    df_display['cadastrado_sistema'] = df_display['cadastrado_sistema'].map({True: 'Sim', False: 'Não'})
+
+    columns_renamed = {
+        'cpf': 'CPF',
+        'tutor': 'Tutor / Dono',
+        'telefone': 'Telefone',
+        'endereco': 'Endereço',
+        'qtd_pets': 'Pets',
+        'qtd_castracoes': 'Castrações',
+        'cadastrado_sistema': 'Cadastrado no sistema',
+        'pets_vacinados': 'Pets vacinados',
+        'pets_com_chip': 'Pets c/ microchip',
+    }
+    df_display = df_display.rename(columns=columns_renamed)
+
+    return dash_table.DataTable(
+        data=df_display.to_dict('records'),
+        columns=[{'name': i, 'id': i} for i in df_display.columns],
+        page_size=15,
+        style_table={'overflowX': 'auto'},
+        style_header={
+            'backgroundColor': '#1c2c51',
+            'fontWeight': '600',
+            'color': 'white',
+            'borderBottom': '2px solid #3B82F6',
+            'textAlign': 'center',
+            'padding': '12px',
+            'fontFamily': 'Sora, sans-serif',
+            'fontSize': '0.78rem',
+            'textTransform': 'uppercase',
+            'letterSpacing': '0.06em'
+        },
+        style_cell={
+            'padding': '10px',
+            'fontFamily': 'DM Sans, sans-serif',
+            'fontSize': '0.86rem',
+            'color': '#374151',
+            'borderBottom': '1px solid rgba(28, 44, 81, 0.10)',
+            'textAlign': 'center'
+        },
+        style_data={'backgroundColor': 'white'},
+        style_data_conditional=[{'if': {'row_index': 'odd'}, 'backgroundColor': '#f9fafb'}],
+        style_as_list_view=True,
+        sort_action='native',
+        filter_action='native',
+        export_format='xlsx',
+        export_headers='display',
+    )
+
+
+def render_historico_tab(df_tutores, kpis):
+    kpi_row = build_historico_kpi_row(kpis)
+    rest = html.Div([
+        html.Div([
+            html.Div('Base de dados', className='sv2-card__eyebrow'),
+            html.Div('Tutores e pets — Histórico', className='sv2-card__title'),
+        ]),
+        html.Div(
+            'CPF, tutor, quantidade de pets/castrações registradas e, para quem já '
+            'está cadastrado no sistema, quantos pets estão vacinados e com microchip.',
+            className='sv2-card__desc'
+        ),
+        build_historico_table(df_tutores),
+    ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '16px'})
+    return kpi_row, rest
 
 
 # ─── Tab: Departamentos ─────────────────────────────────────────────────────
