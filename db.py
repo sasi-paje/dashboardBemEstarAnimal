@@ -1262,8 +1262,11 @@ def get_kpis_por_especie(date_from=None, date_to=None, local=None, servico=None,
 # bea_external_records reúne 3 origens importadas de fora do sistema
 # (Castramóvel, Clínica PetGold, Programa Bem-Estar Animal) — todas só com
 # atendimentos de castração, sem vacinação nem microchip registrados aqui.
+# Por combinado, a tela de Histórico só considera location = 'PROGRAMA
+# BEM-ESTAR ANIMAL' (Castramóvel/Clínica PetGold ficam de fora).
 # Por isso "vacinados" e "com microchip" só existem cruzando o CPF do tutor
 # com o cadastro do sistema (person/pet/trx_vaccine_application).
+HISTORICO_LOCATION = 'PROGRAMA BEM-ESTAR ANIMAL'
 def _historico_date_filter(date_from, date_to, weekend_only, params):
     """Mesmo padrão de filtro de data/fim-de-semana usado no resto do db.py,
     aplicado em cima de service_date (única data real dessa tabela)."""
@@ -1283,13 +1286,14 @@ def get_historico_resumo(date_from=None, date_to=None, weekend_only=False):
     """Contagem rápida (só na própria tabela, sem cruzamento) para o card de
     entrada do panorama — não paga o custo do cruzamento com o sistema."""
     params = []
+    params.append(HISTORICO_LOCATION)
     query = """
     SELECT
         COUNT(*) AS total_registros,
         COUNT(DISTINCT cpf) AS total_tutores,
         COUNT(DISTINCT (cpf, pet_name)) AS total_pets
     FROM bea_external_records
-    WHERE 1=1
+    WHERE location = %s
     """
     query += _historico_date_filter(date_from, date_to, weekend_only, params)
     try:
@@ -1309,11 +1313,11 @@ def get_historico_resumo(date_from=None, date_to=None, weekend_only=False):
 
 
 def get_historico_tutores(date_from=None, date_to=None, weekend_only=False):
-    """Uma linha por tutor (CPF) do histórico (Castramóvel + Clínica PetGold +
-    Programa Bem-Estar Animal), com a quantidade de pets/castrações levados
-    e, para quem já existe cadastrado no sistema (cruzamento por CPF),
-    quantos desses pets têm vacinação aplicada e quantos têm microchip."""
-    params = []
+    """Uma linha por tutor (CPF) do histórico do Programa Bem-Estar Animal,
+    com a quantidade de pets/castrações levados e, para quem já existe
+    cadastrado no sistema (cruzamento por CPF), quantos pets tem cadastrados
+    hoje, quantos têm vacinação aplicada e quantos têm microchip."""
+    params = [HISTORICO_LOCATION]
     date_filter = _historico_date_filter(date_from, date_to, weekend_only, params)
     query = f"""
     WITH historico AS (
@@ -1321,7 +1325,7 @@ def get_historico_tutores(date_from=None, date_to=None, weekend_only=False):
             regexp_replace(cpf, '\\D', '', 'g') AS cpf_clean,
             cpf, owner_name, phone, address, pet_name
         FROM bea_external_records
-        WHERE 1=1 {date_filter}
+        WHERE location = %s {date_filter}
     ),
     tutores AS (
         SELECT
@@ -1345,6 +1349,7 @@ def get_historico_tutores(date_from=None, date_to=None, weekend_only=False):
     agg_pets AS (
         SELECT
             mp.cpf_clean,
+            COUNT(DISTINCT pt.id) AS pets_cadastrados,
             COUNT(DISTINCT pt.id) FILTER (
                 WHERE pt.chip_code IS NOT NULL AND btrim(pt.chip_code) <> ''
             ) AS pets_com_chip,
@@ -1357,6 +1362,7 @@ def get_historico_tutores(date_from=None, date_to=None, weekend_only=False):
     SELECT
         t.cpf, t.tutor, t.telefone, t.endereco, t.qtd_pets, t.qtd_castracoes,
         (mp.cpf_clean IS NOT NULL) AS cadastrado_sistema,
+        COALESCE(ap.pets_cadastrados, 0) AS pets_cadastrados,
         COALESCE(ap.pets_vacinados, 0) AS pets_vacinados,
         COALESCE(ap.pets_com_chip, 0) AS pets_com_chip
     FROM tutores t

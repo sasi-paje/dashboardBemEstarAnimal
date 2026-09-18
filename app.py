@@ -720,7 +720,7 @@ def build_entry_section(kpis_vacina, especies, kpis_castra, resumo_historico=Non
         'fa-solid fa-people-group',
         f"{format_number(resumo_historico['total_tutores'])} tutores",
         'Histórico',
-        'Base de registros passados importados de fora do sistema (Castramóvel, Clínica PetGold e Programa Bem-Estar Animal): tutores, pets e castrações.',
+        'Base de registros passados do Programa Bem-Estar Animal importados de fora do sistema: tutores, pets e castrações.',
         [
             ('Tutores (CPFs)', resumo_historico['total_tutores']),
             ('Pets atendidos', resumo_historico['total_pets']),
@@ -1329,8 +1329,7 @@ def build_fluxo_funil_card(df_fluxo, df_fluxo_historico, df_departamentos):
     ], className='sv2-card', style={'display': 'flex', 'flexDirection': 'column', 'gap': '20px'})
 
 
-# ─── Tela de detalhe: Histórico (Castramóvel + Clínica PetGold + Programa
-#     Bem-Estar Animal) ───────────────────────────────────────────────────
+# ─── Tela de detalhe: Histórico (Programa Bem-Estar Animal) ────────────────
 # Diferente de Vacinação/Castração, essa tela usa o filtro de data do topo
 # aplicado em cima de service_date, mas não o local/espécie — é a base de
 # registros passados (histórico importado de fora do sistema), não o fluxo
@@ -1341,13 +1340,13 @@ def build_kpis_historico(df):
     if df is None or df.empty:
         return {
             'total_tutores': 0, 'total_pets': 0, 'total_castracoes': 0,
-            'tutores_cadastrados': 0, 'pets_vacinados': 0, 'pets_com_chip': 0,
+            'pets_cadastrados': 0, 'pets_vacinados': 0, 'pets_com_chip': 0,
         }
     return {
         'total_tutores': len(df),
         'total_pets': int(df['qtd_pets'].sum()),
         'total_castracoes': int(df['qtd_castracoes'].sum()),
-        'tutores_cadastrados': int(df['cadastrado_sistema'].sum()),
+        'pets_cadastrados': int(df['pets_cadastrados'].sum()),
         'pets_vacinados': int(df['pets_vacinados'].sum()),
         'pets_com_chip': int(df['pets_com_chip'].sum()),
     }
@@ -1367,7 +1366,7 @@ def build_hero_historico(kpis):
             html.Div([
                 html.Div('Histórico', className='sv2-hero__title'),
                 html.Div(
-                    'Base de registros passados importados de fora do sistema',
+                    'Base de registros passados do Programa Bem-Estar Animal',
                     className='sv2-hero__subtitle'
                 ),
             ]),
@@ -1387,8 +1386,8 @@ def build_historico_kpi_row(kpis):
                      'Pets atendidos', format_number(kpis['total_pets'])),
         sv2_kpi_card('fa-solid fa-scissors', '#E7F2EA', 'var(--sv2-green-700)',
                      'Castrações realizadas', format_number(kpis['total_castracoes'])),
-        sv2_kpi_card('fa-solid fa-id-card', '#EAF0FB', '#1c2c51',
-                     'Tutores cadastrados no sistema', format_number(kpis['tutores_cadastrados'])),
+        sv2_kpi_card('fa-solid fa-paw', '#EAF0FB', '#1c2c51',
+                     'Pets cadastrados no sistema', format_number(kpis['pets_cadastrados'])),
         sv2_kpi_card('fa-solid fa-syringe', '#FDEEF0', '#C1447E',
                      'Pets vacinados (dos cadastrados)', format_number(kpis['pets_vacinados'])),
         sv2_kpi_card('fa-solid fa-microchip', '#FDEEF0', '#C1447E',
@@ -1419,6 +1418,7 @@ def build_historico_table(df):
         'qtd_pets': 'Pets',
         'qtd_castracoes': 'Castrações',
         'cadastrado_sistema': 'Cadastrado no sistema',
+        'pets_cadastrados': 'Pets cadastrados',
         'pets_vacinados': 'Pets vacinados',
         'pets_com_chip': 'Pets c/ microchip',
     }
